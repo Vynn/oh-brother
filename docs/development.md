@@ -30,7 +30,21 @@ sh run.sh
 
 `render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print.
 
+The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with warnings and field names in URL-encoded JSON headers. Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
+
 `printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
+
+## Editor geometry
+
+Element positions are in millimetres from the top left of the printable area, which is the rendered canvas. The editor draws the label at its cut size around it:
+
+- Across the tape, the cut size is the tape width from brother_ql's label table.
+- Along continuous tape, brother_ql's feed margin (35 dots, about 3 mm) is added at each end.
+- On die-cut labels, the margins are split evenly between the label size and the printable size.
+
+These cut sizes are derived from brother_ql's label data, not measured.
+
+Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid.
 
 ## Commits
 

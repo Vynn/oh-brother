@@ -10,6 +10,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Fields filled from fixed values or CSV columns
 - [x] Portable folder for Linux x86_64
 - [x] Confirmed printing black and red on a real QL-820NWB
+- [x] Live preview while dragging, snapping, alignment, and the label shown at its cut size (shipped in 0.1.1)
 
 ## Under consideration
 

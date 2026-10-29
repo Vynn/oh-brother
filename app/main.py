@@ -7,6 +7,7 @@ the app folder, then vendor/<platform> (compiled packages), then vendor/common.
 import argparse
 import os
 import socket
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -26,6 +27,20 @@ def free_port(start):
             except OSError:
                 continue
     raise SystemExit("No free port found")
+
+
+def open_browser(url):
+    # On Linux, detach the browser and drop its output: GTK browsers print
+    # session warnings (e.g. atk-bridge) that would land in our terminal.
+    if sys.platform.startswith("linux"):
+        try:
+            subprocess.Popen(["xdg-open", url], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
+            return
+        except OSError:
+            pass
+    webbrowser.open(url)
 
 
 def main():
@@ -51,7 +66,7 @@ def main():
     url = f"http://127.0.0.1:{port}/"
     print(f"Oh-Brother {VERSION} running at {url}  (Ctrl+C to stop)")
     if not args.no_browser:
-        threading.Timer(0.8, webbrowser.open, [url]).start()
+        threading.Timer(0.8, open_browser, [url]).start()
     create_app(os.path.abspath(args.data)).run(
         host="0.0.0.0" if args.lan else "127.0.0.1", port=port, debug=False)
 

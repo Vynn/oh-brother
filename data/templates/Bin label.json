@@ -1,0 +1,14 @@
+{
+  "layout": {
+    "tape": "62red",
+    "length_mm": 30,
+    "orientation": "portrait",
+    "elements": [
+      {"type": "text", "color": "red", "x": 0, "y": 0, "w": 58.9, "h": 9, "text": "{{Location}}", "font": "sans", "bold": true, "size": 0, "align": "center", "valign": "middle", "wrap": false, "invert": true, "padding_mm": 1},
+      {"type": "text", "color": "black", "x": 2, "y": 11, "w": 36, "h": 17, "text": "{{Item}}", "font": "narrow", "bold": true, "size": 0, "align": "left", "valign": "middle", "wrap": true, "invert": false, "padding_mm": 0},
+      {"type": "qr", "color": "black", "x": 40.5, "y": 10.5, "w": 17, "h": 17, "data": "{{SKU}}", "ec": "M"}
+    ]
+  },
+  "fixed": {},
+  "mapping": {"Location": "Location", "Item": "Item", "SKU": "SKU"}
+}

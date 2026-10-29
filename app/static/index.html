@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oh-Brother</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark"></span>Oh-Brother</div>
+  <button class="printer-chip" id="printerChip" type="button">
+    <span class="dot" id="printerDot"></span><span id="printerLabel">No printer set</span>
+  </button>
+</header>
+
+<main class="workspace">
+
+  <!-- Left: label setup, presets, templates -->
+  <aside class="panel left">
+    <section>
+      <h2>Label</h2>
+      <label class="field">Tape
+        <select id="tape"></select>
+      </label>
+      <div class="row2" id="lengthRow">
+        <label class="field">Length (mm)
+          <input type="number" id="length" min="5" max="1000" step="1">
+        </label>
+        <div class="field"><span>Printable</span><output id="printable" class="readout"></output></div>
+      </div>
+      <div class="field">Text direction
+        <div class="seg" id="orientation">
+          <button type="button" data-v="portrait">Across tape</button>
+          <button type="button" data-v="landscape">Along tape</button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Quick layouts</h2>
+      <div class="presets" id="presets"></div>
+    </section>
+
+    <section>
+      <h2>Templates</h2>
+      <div class="inline">
+        <input type="text" id="tplName" placeholder="Template name">
+        <button type="button" id="tplSave">Save</button>
+      </div>
+      <ul class="tpl-list" id="tplList"></ul>
+    </section>
+  </aside>
+
+  <!-- Centre: preview stage, data, print -->
+  <section class="center">
+    <div class="stage" id="stage">
+      <div class="label-wrap" id="labelWrap">
+        <img id="preview" alt="Label preview" draggable="false">
+        <div class="overlay" id="overlay"></div>
+      </div>
+    </div>
+    <div class="stage-foot">
+      <span id="dims" class="readout"></span>
+      <ul class="warnings" id="warnings"></ul>
+    </div>
+
+    <div class="data">
+      <div class="data-head">
+        <h2>Data</h2>
+        <label class="file-btn">Load CSV…<input type="file" id="csvFile" accept=".csv,.tsv,.txt,text/csv"></label>
+        <button type="button" class="link" id="csvClear" hidden>Clear CSV</button>
+        <span class="hint" id="csvInfo">Type <code>{{Name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code></span>
+      </div>
+      <div class="data-body">
+        <table class="fields" id="fields"></table>
+        <div class="rows-wrap" id="rowsWrap" hidden>
+          <table class="rows" id="rows"></table>
+        </div>
+      </div>
+    </div>
+
+    <div class="printbar">
+      <label class="field inline-field">Copies <input type="number" id="copies" min="1" max="100" value="1"></label>
+      <label class="check"><input type="checkbox" id="cut" checked> Cut each label</label>
+      <span class="spacer"></span>
+      <span class="status" id="printStatus" role="status"></span>
+      <button type="button" class="primary" id="printBtn">Print</button>
+    </div>
+  </section>
+
+  <!-- Right: elements and properties -->
+  <aside class="panel right">
+    <section>
+      <h2>Elements</h2>
+      <div class="add-row">
+        <button type="button" data-add="text">+ Text</button>
+        <button type="button" data-add="qr">+ QR</button>
+        <button type="button" data-add="barcode">+ Barcode</button>
+        <button type="button" data-add="rect">+ Box</button>
+      </div>
+      <ol class="el-list" id="elList"></ol>
+    </section>
+    <section id="props" class="props"></section>
+  </aside>
+</main>
+
+<dialog id="settings">
+  <form method="dialog" class="dialog">
+    <h2>Printer</h2>
+    <div class="row2">
+      <label class="field">Address (IP or hostname)
+        <input type="text" id="cfgHost" placeholder="192.168.1.50" autocomplete="off">
+      </label>
+      <label class="field narrow">Port
+        <input type="number" id="cfgPort" min="1" max="65535">
+      </label>
+    </div>
+    <label class="field">Model
+      <select id="cfgModel"></select>
+    </label>
+    <p class="status" id="cfgStatus"></p>
+    <div class="dialog-actions">
+      <button type="button" id="cfgTest">Test connection</button>
+      <span class="spacer"></span>
+      <button value="cancel">Cancel</button>
+      <button type="button" class="primary" id="cfgSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

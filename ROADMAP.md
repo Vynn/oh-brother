@@ -1,0 +1,20 @@
+# Roadmap
+
+Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2, 0.3, …) until 1.0. Until then every build is a pre-release, and builds between milestones are patch versions (0.1.1, 0.1.2, …).
+
+## 0.1 · First build · released
+
+- [x] One- and two-colour printing to a network QL-820NWB
+- [x] Text, QR code, barcode and box elements, in black or red
+- [x] Quick layouts and saved templates
+- [x] Fields filled from fixed values or CSV columns
+- [x] Portable folder for Linux x86_64
+- [x] Confirmed printing black and red on a real QL-820NWB
+
+## Under consideration
+
+Not scheduled yet.
+
+- Click-to-launch: a Quit button, a single running instance, an optional idle shutdown, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
+- Windows: a `run.bat` launcher and a Windows runtime
+- Tested runtimes for ARM Linux and macOS

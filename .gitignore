@@ -1,0 +1,16 @@
+# Built by build.sh
+/runtime/
+/vendor/
+
+# Per-machine settings (printer address)
+/data/config.json
+
+# Anything containing real personal data
+private/
+
+# Local Claude app settings (not part of the project)
+.claude/
+
+__pycache__/
+*.pyc
+.DS_Store

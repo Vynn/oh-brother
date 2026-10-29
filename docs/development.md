@@ -1,0 +1,79 @@
+# Development
+
+The app is plain Python with a plain HTML, CSS and JavaScript front end. There's no front-end build step. `build.sh` only fetches the Python runtime and packages.
+
+## Layout
+
+| Path | Contents | In the repo? |
+|---|---|---|
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `printer.py`), web UI (`static/`), fonts | Yes |
+| `data/templates/` | Saved templates | Yes |
+| `data/samples/` | Sample data | Yes |
+| `data/config.json` | Printer address, per machine | No |
+| `runtime/<platform>/` | Standalone Python | No, built |
+| `vendor/common/` | Pure-Python packages, shared by all platforms | No, built |
+| `vendor/<platform>/` | Compiled packages (Pillow) | No, built |
+| `private/` | Anything with real personal data | No |
+
+## Build and run
+
+```sh
+sh build.sh
+sh run.sh
+```
+
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled).
+
+`.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
+
+## How printing works
+
+`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print.
+
+`printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
+
+## Commits
+
+Every commit is checked for personal details: names, home paths, IP addresses, hostnames and addresses. Item names in templates and samples are fine. Commit messages are short prose paragraphs.
+
+## Third-party code
+
+### Fonts (in the repo)
+
+All from Ubuntu's packages, unmodified, in `app/fonts/`.
+
+| File | Version | SHA-256 |
+|---|---|---|
+| `DejaVuSans.ttf` | 2.37 | `b4c632e3cdf9acc7f28758fb5a323c8524d7fc6660d46904d9b6cbe2809c419c` |
+| `DejaVuSans-Bold.ttf` | 2.37 | `e1d733afbbfce842a1b43dced0c9885a76a4e67290dc7e690c4e9b76ebfc7d23` |
+| `DejaVuSansMono.ttf` | 2.37 | `a54dca07c76d6289e717e75e0a58c0128f6d7269ef3faf76417c9d7d3bba37ab` |
+| `DejaVuSansMono-Bold.ttf` | 2.37 | `2d67eed9b325ee2e69f906ce4f3f6264d5105230a13352c8494daad4f17b12c8` |
+| `DejaVuSerif.ttf` | 2.37 | `a52c2a69dfc93d0b511b98c1019a57eb3d6a62d328bdf1387f00851b02e3a315` |
+| `DejaVuSerif-Bold.ttf` | 2.37 | `3f704f75238454f68a8202e5098cb0687887480dd63d3dc20b34bdbdfa9d9f3f` |
+| `LiberationSansNarrow-Regular.ttf` | 1.07 | `8ff00a422289dce865973a299c9284ab7cb91a2b1ef1c7b9ef622b793cab5447` |
+| `LiberationSansNarrow-Bold.ttf` | 1.07 | `3271f41b67a81a806aadbf71762c14a405e617b738d9ceeb81191dd681c66fc4` |
+
+- **DejaVu** comes from [dejavu-fonts](https://dejavu-fonts.github.io/), Ubuntu package `fonts-dejavu-core` 2.37. Its licence is the Bitstream Vera licence (DejaVu's changes are public domain), in `LICENSE-DejaVu.txt`.
+- **Liberation Sans Narrow** comes from [liberationfonts/liberation-sans-narrow](https://github.com/liberationfonts/liberation-sans-narrow), Ubuntu package `fonts-liberation-sans-narrow` 1.07.6. Its licence is GPL-2 with a font exception, in `LICENSE-LiberationSansNarrow.txt` and `GPL-2.txt`.
+
+### Runtime and packages (built, not in the repo)
+
+| Component | Version | Licence |
+|---|---|---|
+| [python-build-standalone](https://github.com/astral-sh/python-build-standalone) CPython | 3.13.18 (20261026) | PSF-2.0 |
+| [brother-ql-inventree](https://pypi.org/project/brother-ql-inventree/) | 1.3 | GPL-3.0-or-later |
+| Flask | 3.1.3 | BSD-3-Clause |
+| Werkzeug | 3.1.9 | BSD-3-Clause |
+| Jinja2 | 3.1.6 | BSD-3-Clause |
+| MarkupSafe | 3.0.4 | BSD-3-Clause |
+| itsdangerous | 2.2.0 | BSD-3-Clause |
+| click | 8.5.0 | BSD-3-Clause |
+| blinker | 1.9.0 | MIT |
+| Pillow | 12.3.0 | MIT-CMU |
+| qrcode | 8.2 | BSD |
+| python-barcode | 0.16.1 | MIT |
+| packbits | 0.6 | MIT |
+| pyusb | 1.3.1 | BSD-3-Clause |
+| attrs | 26.1.0 | MIT |
+
+brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.

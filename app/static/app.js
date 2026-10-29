@@ -45,7 +45,11 @@ const S = {
 };
 
 const STORE = "oh-brother:v1";
-const save = () => { try { localStorage.setItem(STORE, JSON.stringify({ layout: S.layout, fixed: S.fixed })); } catch {} };
+const save = () => { clearTimeout(saveTimer); try { localStorage.setItem(STORE, JSON.stringify({ layout: S.layout, fixed: S.fixed })); } catch {} };
+// Coalesce saves: dragging changes the layout every frame
+let saveTimer = 0;
+const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 400); };
+addEventListener("pagehide", save);
 const restore = () => {
   try {
     const j = JSON.parse(localStorage.getItem(STORE) || "null");
@@ -66,7 +70,19 @@ function canvasMM() {
   return { w, h: hh };
 }
 
+// Cut label around the printable canvas, in mm and canvas orientation:
+// side margins from the tape width, end margins from the feed (continuous)
+// or the die-cut label length.
+function paperMM() {
+  const t = tape(), c = canvasMM();
+  const across = Math.max(0, (t.tape_mm[0] - t.dots[0] / dpmm()) / 2);
+  const along = t.endless ? t.feed_mm : Math.max(0, (t.tape_mm[1] - t.dots[1] / dpmm()) / 2);
+  const [mx, my] = S.layout.orientation === "landscape" ? [along, across] : [across, along];
+  return { mx, my, w: c.w + 2 * mx, h: c.h + 2 * my };
+}
+
 const r1 = (v) => Math.round(v * 10) / 10;
+const r2 = (v) => Math.round(v * 100) / 100;   // snapped positions (centres) need 0.01 mm
 const snap = (v) => Math.round(v * 2) / 2;   // 0.5 mm grid
 
 // ---------------------------------------------------------------------------
@@ -105,8 +121,9 @@ const PRESETS = [
       T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}\n{{Country}}", valign: "top", wrap: false })] },
 ];
 
+// 0.01 mm, so full-width preset elements line up exactly with the label edges
 function roundAll(els) {
-  return els.map((e) => ({ ...e, x: r1(e.x), y: r1(e.y), w: r1(e.w), h: r1(e.h) }));
+  return els.map((e) => ({ ...e, x: r2(e.x), y: r2(e.y), w: r2(e.w), h: r2(e.h) }));
 }
 
 // Thumbnail: draw the preset at a nominal 60x30 mm with text as grey bars
@@ -165,49 +182,63 @@ function autoMap() {
 }
 
 // ---------------------------------------------------------------------------
-// Preview rendering (debounced, stale responses dropped)
+// Preview rendering
+// One request in flight at a time. Edits made meanwhile trigger one more
+// render when it returns, so the preview keeps up while dragging.
 // ---------------------------------------------------------------------------
 
-let renderTimer = 0, renderSeq = 0;
-function schedule() {
-  save();
+let renderTimer = 0, renderBusy = false, renderAgain = false, previewURL = null;
+
+// delay: debounce for typing; 0 while dragging
+function schedule(delay = 90) {
+  saveSoon();
+  drawOverlay();
   clearTimeout(renderTimer);
-  renderTimer = setTimeout(doRender, 90);
+  renderTimer = setTimeout(() => { if (renderBusy) renderAgain = true; else doRender(); }, delay);
 }
 
 async function doRender() {
-  const seq = ++renderSeq;
+  renderBusy = true; renderAgain = false;
   try {
-    const j = await api("/api/render", { method: "POST", body: { layout: S.layout, record: previewRecord() } });
-    if (seq !== renderSeq) return;
-    const img = $("#preview");
-    img.src = j.image;
-    img.dataset.w = j.width; img.dataset.h = j.height;
-    const placeholdersChanged = j.placeholders.join("\u0000") !== S.placeholders.join("\u0000");
-    S.placeholders = j.placeholders;
-    if (placeholdersChanged) { autoMap(); drawData(); }
-    fit();
-    drawWarnings(j.warnings);
+    const r = await fetch("/api/render", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: S.layout, record: previewRecord() }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status} ${r.statusText}`);
+    const meta = (k) => JSON.parse(decodeURIComponent(r.headers.get(k) || "%5B%5D"));
+    const warnings = meta("X-Warnings"), placeholders = meta("X-Placeholders");
+    const url = URL.createObjectURL(await r.blob());
+    // Decode off-screen first so the swap never shows a blank frame
+    const next = new Image();
+    next.src = url;
+    await next.decode().catch(() => {});
+    $("#preview").src = url;
+    if (previewURL) URL.revokeObjectURL(previewURL);
+    previewURL = url;
+    const changed = placeholders.join("\u0000") !== S.placeholders.join("\u0000");
+    S.placeholders = placeholders;
+    if (changed) { autoMap(); drawData(); }
+    drawWarnings(warnings);
   } catch (e) {
     drawWarnings([e.message]);
+  } finally {
+    renderBusy = false;
+    if (renderAgain) doRender();
   }
 }
 
-// Scale the preview to fit the stage (never larger than 2x, crisp at 1x)
+// Size the paper (cut size) and its print area to fit the stage
+// (never larger than 2x; crisp pixels at 1x and up)
 function fit() {
-  const img = $("#preview");
-  const W = +img.dataset.w, H = +img.dataset.h;
-  if (!W) return;
+  if (!S.meta) return;
+  const c = canvasMM(), p = paperMM(), k = dpmm();
   const st = $("#stage");
-  const s = Math.min(2, (st.clientWidth - 56) / W, (st.clientHeight - 56) / H);
-  S.scale = Math.max(0.1, s);
-  img.style.width = W * S.scale + "px";
-  img.style.height = H * S.scale + "px";
-  // Hard pixels when zoomed in (true 1-bit look); smooth when shrunk, to avoid shimmer
-  img.style.imageRendering = S.scale >= 1 ? "pixelated" : "auto";
-  $("#labelWrap").classList.toggle("round", tape().round);
-  const c = canvasMM();
-  $("#dims").textContent = `${r1(c.w)} × ${r1(c.h)} mm`;
+  S.scale = Math.max(0.1, Math.min(2, (st.clientWidth - 56) / (p.w * k), (st.clientHeight - 56) / (p.h * k)));
+  const px = k * S.scale;
+  const wrap = $("#labelWrap");
+  wrap.style.padding = `${p.my * px}px ${p.mx * px}px`;
+  wrap.classList.toggle("round", tape().round);
+  Object.assign($("#printArea").style, { width: c.w * px + "px", height: c.h * px + "px" });
+  $("#preview").style.imageRendering = S.scale >= 1 ? "pixelated" : "auto";
+  $("#dims").textContent = `Cut ${r1(p.w)} × ${r1(p.h)} mm · printable ${r1(c.w)} × ${r1(c.h)} mm`;
   drawOverlay();
 }
 
@@ -216,50 +247,177 @@ function drawWarnings(list) {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay: selection boxes, drag to move, handle to resize
+// Overlay: selection boxes, drag to move, handles to resize, snapping
 // ---------------------------------------------------------------------------
 
+const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
+const SNAP_PX = 6;   // snap distance on screen
+
 function drawOverlay() {
-  const k = dpmm() * S.scale;
-  const ov = $("#overlay");
-  ov.replaceChildren(...S.layout.elements.map((e, i) => {
-    const box = h("div", { class: "box" + (i === S.sel ? " sel" : ""), "data-i": i },
-      h("div", { class: "handle" }));
-    Object.assign(box.style, { left: e.x * k + "px", top: e.y * k + "px", width: e.w * k + "px", height: e.h * k + "px" });
-    return box;
-  }));
+  const ov = $("#overlay"), els = S.layout.elements;
+  // Rebuild only when the element count changes. Otherwise update in place,
+  // so a box being dragged is never replaced under the pointer.
+  if (ov.children.length !== els.length) {
+    ov.replaceChildren(...els.map((_, i) => h("div", { class: "box", "data-i": i },
+      ...HANDLES.map((d) => h("div", { class: `handle ${d}${d.length === 1 ? " edge" : ""}`, "data-h": d })))));
+  }
+  els.forEach((e, i) => placeBox(ov.children[i], e, i));
+}
+
+function placeBox(box, e, i) {
+  const k = dpmm() * S.scale, w = e.w * k, hh = e.h * k;
+  // QR codes stay square, so corners only; small boxes too
+  const small = e.type === "qr" || w < 36 || hh < 36;
+  box.className = "box" + (i === S.sel ? " sel" : "") + (small ? " small" : "");
+  box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
+}
+
+// Snap lines in mm: the printable area's edges and centre, and every other
+// element's edges and centre
+function snapTargets(skip) {
+  const c = canvasMM();
+  const xs = [0, c.w / 2, c.w], ys = [0, c.h / 2, c.h];
+  S.layout.elements.forEach((o, j) => {
+    if (j === skip || o.hidden) return;
+    xs.push(o.x, o.x + o.w / 2, o.x + o.w);
+    ys.push(o.y, o.y + o.h / 2, o.y + o.h);
+  });
+  return { xs, ys };
+}
+
+// Closest target to any of the points, within thr: {d: offset, at: target}
+function nearest(points, targets, thr) {
+  let best = null;
+  for (const p of points) for (const t of targets) {
+    const d = t - p;
+    if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: t };
+  }
+  return best;
+}
+
+function drawGuides(gx = [], gy = []) {
+  const k = dpmm() * S.scale, c = canvasMM(), ext = 10;
+  const line = (x1, y1, x2, y2) => {
+    const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    Object.entries({ x1, y1, x2, y2 }).forEach(([a, v]) => l.setAttribute(a, v));
+    return l;
+  };
+  const px = (mm) => Math.round(mm * k) + 0.5;   // centre 1px lines on a pixel
+  $("#guides").replaceChildren(
+    ...gx.map((x) => line(px(x), -ext, px(x), c.h * k + ext)),
+    ...gy.map((y) => line(-ext, px(y), c.w * k + ext, px(y))));
 }
 
 $("#overlay").addEventListener("pointerdown", (ev) => {
+  if (ev.button !== 0) return;
   const box = ev.target.closest(".box");
   if (!box) { select(-1); return; }
   const i = +box.dataset.i;
-  select(i);
+  if (i !== S.sel) select(i);
   const e = S.layout.elements[i];
-  const resize = ev.target.classList.contains("handle");
-  const start = { x: ev.clientX, y: ev.clientY, ex: e.x, ey: e.y, ew: e.w, eh: e.h };
+  const hd = ev.target.dataset.h || "";   // resize direction; "" = move
   const k = dpmm() * S.scale;
-  const el = $("#overlay").querySelector(`[data-i="${i}"]`);
-  el.setPointerCapture(ev.pointerId);
-  const move = (m) => {
-    const dx = (m.clientX - start.x) / k, dy = (m.clientY - start.y) / k;
-    if (resize) {
-      e.w = Math.max(1, snap(start.ew + dx));
-      e.h = Math.max(0.5, snap(start.eh + dy));
-      if (e.type === "qr") e.h = e.w;
+  const start = { x: ev.clientX, y: ev.clientY, l: e.x, t: e.y, r: e.x + e.w, b: e.y + e.h };
+  const targets = snapTargets(i);
+  let last = null, frame = 0;
+
+  // Applied once per animation frame with the latest pointer position
+  const apply = () => {
+    frame = 0;
+    const dx = (last.clientX - start.x) / k, dy = (last.clientY - start.y) / k;
+    const free = last.altKey, thr = SNAP_PX / k;
+    let gx = [], gy = [];
+    if (!hd) {
+      // Move: any of the left/centre/right (top/middle/bottom) lines may snap
+      let x = start.l + dx, y = start.t + dy;
+      const sx = !free && nearest([x, x + e.w / 2, x + e.w], targets.xs, thr);
+      const sy = !free && nearest([y, y + e.h / 2, y + e.h], targets.ys, thr);
+      if (sx) { x += sx.d; gx.push(sx.at); } else if (!free) x = snap(x);
+      if (sy) { y += sy.d; gy.push(sy.at); } else if (!free) y = snap(y);
+      e.x = r2(x); e.y = r2(y);
     } else {
-      e.x = snap(start.ex + dx);
-      e.y = snap(start.ey + dy);
+      // Resize: only the dragged edges move, and each one snaps on its own
+      const edge = (v, list, guides) => {
+        if (free) return v;
+        const s = nearest([v], list, thr);
+        if (s) { guides.push(s.at); return s.at; }
+        return snap(v);
+      };
+      let { l, t, r, b } = start;
+      if (hd.includes("w")) l = Math.min(edge(l + dx, targets.xs, gx), r - 1);
+      if (hd.includes("e")) r = Math.max(edge(r + dx, targets.xs, gx), l + 1);
+      if (hd.includes("n")) t = Math.min(edge(t + dy, targets.ys, gy), b - 0.5);
+      if (hd.includes("s")) b = Math.max(edge(b + dy, targets.ys, gy), t + 0.5);
+      if (e.type === "qr") {
+        // Square, anchored at the opposite corner; keep only guides still on an edge
+        const s = Math.max(r - l, b - t);
+        if (hd.includes("w")) l = r - s; else r = l + s;
+        if (hd.includes("n")) t = b - s; else b = t + s;
+        gx = gx.filter((v) => Math.abs(v - l) < 1e-6 || Math.abs(v - r) < 1e-6);
+        gy = gy.filter((v) => Math.abs(v - t) < 1e-6 || Math.abs(v - b) < 1e-6);
+      }
+      e.x = r2(l); e.y = r2(t); e.w = r2(r - l); e.h = r2(b - t);
     }
-    Object.assign(el.style, { left: e.x * k + "px", top: e.y * k + "px", width: e.w * k + "px", height: e.h * k + "px" });
+    placeBox(box, e, i);
+    drawGuides(gx, gy);
     drawProps(true);
-    schedule();
+    schedule(0);
   };
-  const up = () => { el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); };
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", up);
+  const onMove = (m) => { last = m; if (!frame) frame = requestAnimationFrame(apply); };
+  const end = () => {
+    if (frame) { cancelAnimationFrame(frame); apply(); }
+    box.removeEventListener("pointermove", onMove);
+    box.removeEventListener("pointerup", end);
+    box.removeEventListener("pointercancel", end);
+    drawGuides();
+    save();
+  };
+  box.setPointerCapture(ev.pointerId);
+  box.addEventListener("pointermove", onMove);
+  box.addEventListener("pointerup", end);
+  box.addEventListener("pointercancel", end);
   ev.preventDefault();
 });
+
+// Align the selected element within the printable area
+const ALIGN = [
+  ["left", "Align left", (e) => { e.x = 0; }],
+  ["hcenter", "Centre horizontally", (e, c) => { e.x = r2((c.w - e.w) / 2); }],
+  ["right", "Align right", (e, c) => { e.x = r2(c.w - e.w); }],
+  null,
+  ["top", "Align top", (e) => { e.y = 0; }],
+  ["vcenter", "Centre vertically", (e, c) => { e.y = r2((c.h - e.h) / 2); }],
+  ["bottom", "Align bottom", (e, c) => { e.y = r2(c.h - e.h); }],
+];
+
+// 16px icon: a guide line and two bars, drawn for "left" then transposed
+function alignIcon(kind) {
+  const pos = { left: 0, top: 0, hcenter: 1, vcenter: 1, right: 2, bottom: 2 }[kind];
+  const vert = ["top", "vcenter", "bottom"].includes(kind);
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", 16); svg.setAttribute("height", 16);
+  const add = (tag, a) => {
+    const n = document.createElementNS(ns, tag);
+    for (const [key, v] of Object.entries(a)) n.setAttribute(vert ? { x: "y", y: "x", width: "height", height: "width", x1: "y1", y1: "x1", x2: "y2", y2: "x2" }[key] || key : key, v);
+    svg.append(n);
+  };
+  const at = [2.5, 8, 13.5][pos];
+  add("line", { x1: at, y1: 1.5, x2: at, y2: 14.5, stroke: "currentColor", "stroke-width": 1 });
+  for (const [len, y] of [[9, 4], [6, 9]]) {
+    add("rect", { x: [4, 8 - len / 2, 12 - len][pos], y, width: len, height: 3, fill: "currentColor", rx: 0.5 });
+  }
+  return svg;
+}
+
+function alignRow() {
+  return h("div", { class: "align" }, ...ALIGN.map((a) => !a ? h("span", { class: "gap" }) :
+    h("button", { type: "button", class: "icon", title: a[1], onclick: () => {
+      a[2](S.layout.elements[S.sel], canvasMM());
+      drawProps(true); schedule();
+    } }, alignIcon(a[0]))));
+}
 
 // Keyboard: nudge with arrows (Shift = 2 mm), Delete removes
 document.addEventListener("keydown", (ev) => {
@@ -267,7 +425,7 @@ document.addEventListener("keydown", (ev) => {
   const e = S.layout.elements[S.sel];
   const step = ev.shiftKey ? 2 : 0.5;
   const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
-  if (d) { e.x = r1(e.x + d[0]); e.y = r1(e.y + d[1]); drawOverlay(); drawProps(true); schedule(); ev.preventDefault(); }
+  if (d) { e.x = r2(e.x + d[0]); e.y = r2(e.y + d[1]); drawProps(true); schedule(); ev.preventDefault(); }
   else if (ev.key === "Delete" || ev.key === "Backspace") { removeEl(S.sel); ev.preventDefault(); }
   else if (ev.key === "Escape") select(-1);
 });
@@ -373,6 +531,7 @@ function drawProps(light = false) {
 
   kids.push(h("div", { class: "row4 num4" },
     fld("X", num("x")), fld("Y", num("y")), fld("W", num("w", { min: 0.5 })), fld("H", num("h", { min: 0.5 }))));
+  kids.push(h("div", { class: "field" }, "Align to label", alignRow()));
   kids.push(h("div", { class: "field" }, "Colour", seg("color", [
     ["black", "Black"],
     ["red", "Red", { cls: "red", disabled: !redOK, title: redOK ? "" : "Needs black/red tape (DK-2251)" }]])));
@@ -435,7 +594,7 @@ function reshape(change) {
       }
     }
   }
-  drawSetup(); drawList(); drawProps(); schedule();
+  drawSetup(); drawList(); drawProps(); fit(); schedule();
 }
 
 $("#tape").addEventListener("change", (ev) => reshape(() => { S.layout.tape = ev.target.value; }));
@@ -478,7 +637,7 @@ async function loadTemplate(n) {
   if (j.mapping) S.mapping = { ...S.mapping, ...j.mapping };
   $("#tplName").value = n;
   S.sel = -1;
-  drawSetup(); drawList(); drawProps(); drawData(); schedule();
+  drawSetup(); drawList(); drawProps(); drawData(); fit(); schedule();
 }
 
 $("#tplSave").addEventListener("click", async () => {
@@ -652,7 +811,7 @@ $("#cfgTest").addEventListener("click", async () => {
   }
   drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); drawPrinterChip();
   drawTemplates();
-  schedule();
+  fit(); schedule();
   if (S.meta.config.printer_host) testPrinter();
   new ResizeObserver(fit).observe($("#stage"));
 })();

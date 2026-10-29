@@ -2,6 +2,21 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.1.1 · unreleased
+
+### Added
+
+- Snapping: element edges and centres snap to the printable area's edges and centre and to other elements, with guide lines. Alt turns it off.
+- Resize handles on every corner and edge (corners only for QR codes and small elements).
+- Align buttons for the selected element: left, centre, right, top, middle, bottom.
+- The label is drawn at its cut size, with a dashed line around the printable area. The readout shows both sizes.
+
+### Changed
+
+- The preview updates live while dragging, instead of after the pointer stops.
+- Dragging no longer stalls when a preview arrives mid-drag.
+- Previews are sent as plain PNG images rather than base64 JSON.
+
 ## 0.1.0 · 2026-10-29
 
 The first build. A pre-release.

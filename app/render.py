@@ -64,6 +64,10 @@ def tape_list(model="QL-820NWB"):
             "round": lbl.form_factor == FormFactor.ROUND_DIE_CUT,
             "dots": list(lbl.dots_printable),
             "printable_mm": [round(d / DPMM, 1) for d in lbl.dots_printable],
+            # Physical (cut) size; height 0 = continuous. The printer feeds
+            # feed_mm of blank tape before and after a continuous label.
+            "tape_mm": list(lbl.tape_size),
+            "feed_mm": round(lbl.feed_margin / DPMM, 2) if endless else 0,
         })
     # Two-colour tape first, then continuous, then die-cut
     out.sort(key=lambda t: (not t["red"], not t["endless"], t["dots"][0], t["dots"][1]))

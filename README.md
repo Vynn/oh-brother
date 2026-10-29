@@ -30,8 +30,11 @@ Your browser opens the app. Click the printer chip (top right) and enter the pri
 
 - **Label:** tape, length (continuous tape), and text direction (across or along the tape). The layout scales when these change.
 - **Quick layouts** replace the current elements with a starting layout.
+- **Editor:** the label is shown at its cut size. The dashed line is the printable area.
 - **Elements:** text, QR code, Code 128 barcode, and box or line, each in black or red.
-  - Drag to move. Drag the corner to resize.
+  - Drag to move. Drag a corner or edge handle to resize.
+  - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid. Hold Alt to place freely.
+  - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
   - Arrow keys nudge the selected element (Shift for bigger steps). Delete removes it.
   - Text size 0 shrinks the text to fit its box.
 - **Fields:** `{{Name}}` in any text, QR code or barcode becomes a field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.

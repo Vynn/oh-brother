@@ -1,13 +1,13 @@
 """Flask backend. Stateless apart from config and templates in the data folder."""
 
-import base64
 import csv
 import io
 import json
 import os
 import re
+from urllib.parse import quote
 
-from flask import Flask, abort, jsonify, request, send_from_directory
+from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 import printer
 import render
@@ -83,6 +83,8 @@ def create_app(data_dir):
 
     @app.post("/api/render")
     def render_preview():
+        # Raw PNG (fast compression) rather than base64 JSON: this runs on
+        # every drag frame. Metadata rides along in headers as URL-encoded JSON.
         b = body()
         layout = b.get("layout", {})
         try:
@@ -90,10 +92,12 @@ def create_app(data_dir):
         except Exception as e:
             return jsonify(error=str(e)), 400
         buf = io.BytesIO()
-        img.save(buf, "PNG")
-        return jsonify(image="data:image/png;base64," + base64.b64encode(buf.getvalue()).decode(),
-                       width=img.width, height=img.height, warnings=warnings,
-                       placeholders=render.placeholders(layout))
+        img.save(buf, "PNG", compress_level=1)
+        return Response(buf.getvalue(), mimetype="image/png", headers={
+            "Cache-Control": "no-store",
+            "X-Warnings": quote(json.dumps(warnings)),
+            "X-Placeholders": quote(json.dumps(render.placeholders(layout))),
+        })
 
     @app.post("/api/print")
     def print_labels():

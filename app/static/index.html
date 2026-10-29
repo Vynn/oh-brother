@@ -56,9 +56,14 @@
   <!-- Centre: preview stage, data, print -->
   <section class="center">
     <div class="stage" id="stage">
+      <!-- Paper at cut size; the print area inside it is the rendered canvas -->
       <div class="label-wrap" id="labelWrap">
-        <img id="preview" alt="Label preview" draggable="false">
-        <div class="overlay" id="overlay"></div>
+        <div class="print-area" id="printArea">
+          <img id="preview" alt="Label preview" draggable="false">
+          <div class="safe" title="Printable area"></div>
+          <svg class="guides" id="guides"></svg>
+          <div class="overlay" id="overlay"></div>
+        </div>
       </div>
     </div>
     <div class="stage-foot">

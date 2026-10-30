@@ -2,6 +2,13 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## Unreleased
+
+### Added
+
+- Empty QR codes and barcodes show a placeholder in the editor: blue hatching with a caption such as "QR · no data", or "Barcode · invalid data" when a barcode can't encode its data. It is drawn only in the editor, never into the label, so it can't print or be mistaken for a code.
+- Printing warns when a QR code or barcode was blank on any label, with the number of labels affected.
+
 ## 0.2.1 · 2026-10-29
 
 Metric or imperial units.

@@ -170,6 +170,19 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
   content: "Editing"; position: absolute; left: -2px; bottom: 100%; margin-bottom: 2px;
   padding: 0 5px; font: 600 10px/16px var(--font); color: #fff; background: var(--accent); border-radius: 3px 3px 0 0;
 }
+/* Empty or invalid QR/barcode: hatched placeholder in the selection blue, so it
+   can't pass for a printed code. Drawn only in the editor, never in the image. */
+.box.blank {
+  outline: 1px dashed rgba(47,111,223,.55);
+  background: repeating-linear-gradient(-45deg, rgba(47,111,223,.13) 0 1px, transparent 1px 6px);
+}
+.box.blank::after {
+  content: attr(data-blank); position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  overflow: hidden; white-space: nowrap; pointer-events: none;
+  font: 500 10px/1 var(--font); color: var(--accent);
+}
+.box.blank.sel { outline: 1.5px solid var(--accent); }
+.box.blank.editing { outline: 2px solid var(--accent); }
 .marquee { position: absolute; display: none; pointer-events: none; border: 1px solid var(--accent); background: rgba(47,111,223,.08); }
 .box.sel.small .handle.edge { display: none; }   /* too cramped for 8 handles */
 .handle.nw { left: 0;   top: 0;    cursor: nwse-resize; }

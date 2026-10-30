@@ -44,6 +44,7 @@ const S = {
   picked: new Set(),    // selected CSV row indexes
   cur: 0,               // CSV row shown in preview
   placeholders: [],
+  blank: new Map(),   // element index -> "empty"|"invalid" for codes that drew nothing
   scale: 1,             // screen px per dot
 };
 
@@ -581,7 +582,7 @@ async function doRender() {
       body: JSON.stringify({ layout: S.layout, record: previewRecord(), chain: chain() }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status} ${r.statusText}`);
     const meta = (k) => JSON.parse(decodeURIComponent(r.headers.get(k) || "%5B%5D"));
-    const warnings = meta("X-Warnings"), placeholders = meta("X-Placeholders");
+    const warnings = meta("X-Warnings"), placeholders = meta("X-Placeholders"), blank = meta("X-Blank");
     const url = URL.createObjectURL(await r.blob());
     // Decode off-screen first so the swap never shows a blank frame
     const next = new Image();
@@ -590,6 +591,8 @@ async function doRender() {
     $("#preview").src = url;
     if (previewURL) URL.revokeObjectURL(previewURL);
     previewURL = url;
+    S.blank = new Map(blank.map((b) => [b.i, b.why]));
+    drawOverlay();
     const changed = placeholders.join("\u0000") !== S.placeholders.join("\u0000");
     S.placeholders = placeholders;
     if (changed) { autoMap(); drawData(); }
@@ -648,6 +651,12 @@ function placeBox(box, e, i) {
   const small = e.type === "qr" || w < 36 || hh < 36;
   box.className = "box" + (S.pick.has(i) ? " sel" : "") + (S.pick.size === 1 ? " solo" : "")
     + (small ? " small" : "") + (i === S.editing ? " editing" : "");
+  // Blank QR/barcode: an editor-only placeholder (never part of the printed image)
+  const why = S.blank.get(i);
+  if (why && (e.type === "qr" || e.type === "barcode")) {
+    box.classList.add("blank");
+    box.dataset.blank = `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
+  } else delete box.dataset.blank;
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
 }
 

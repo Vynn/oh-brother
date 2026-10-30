@@ -225,9 +225,10 @@ def _draw_text(mask, el, text, warnings):
 
 
 def _draw_qr(mask, el, data, warnings):
+    """Draw a QR code. Returns "empty" when there is nothing to encode."""
     W, H = mask.size
     if not data:
-        return
+        return "empty"
     ec = {"L": qrcode.constants.ERROR_CORRECT_L, "M": qrcode.constants.ERROR_CORRECT_M,
           "Q": qrcode.constants.ERROR_CORRECT_Q, "H": qrcode.constants.ERROR_CORRECT_H}
     qr = qrcode.QRCode(border=0, error_correction=ec.get(el.get("ec", "M"), ec["M"]))
@@ -249,14 +250,15 @@ def _draw_qr(mask, el, data, warnings):
 
 
 def _draw_barcode(mask, el, data, warnings):
+    """Draw a barcode. Returns "empty" or "invalid" when nothing is drawn."""
     W, H = mask.size
     if not data:
-        return
+        return "empty"
     try:
         modules = pybarcode.get(el.get("symbology", "code128"), data).build()[0]
     except Exception as e:
         warnings.append(f"Barcode error: {e}")
-        return
+        return "invalid"
     n = len(modules)
     mod = W // n
     if mod < 2:
@@ -288,16 +290,21 @@ def _draw_rect(mask, el):
 
 
 def render(layout, record=None, keep_missing=True, chain=()):
-    """Render a layout. Returns (RGB image, list of warning strings)."""
+    """Render a layout. Returns (RGB image, warning strings, blank codes).
+
+    Blank codes are QR codes and barcodes that drew nothing, as
+    {"i": element index, "type": "qr"|"barcode", "why": "empty"|"invalid"}.
+    The editor marks them; they are never drawn into the image.
+    """
     record = record or {}
-    warnings = []
+    warnings, blank = [], []
     tape = _label(layout.get("tape", "62red"))
     red_ok = bool(tape.color)
     W, H = canvas_dots(layout)
     img = Image.new("RGB", (W, H), COLORS["white"])
     red_downgraded = False
 
-    for el in layout.get("elements", []):
+    for i, el in enumerate(layout.get("elements", [])):
         if el.get("hidden"):
             continue
         x, y = mm(el.get("x", 0)), mm(el.get("y", 0))
@@ -319,10 +326,11 @@ def render(layout, record=None, keep_missing=True, chain=()):
                 img.paste(COLORS["white"], (x, y), mask)
                 continue
             _draw_text(mask, el, text, warnings)
-        elif kind == "qr":
-            _draw_qr(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
-        elif kind == "barcode":
-            _draw_barcode(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
+        elif kind in ("qr", "barcode"):
+            draw = _draw_qr if kind == "qr" else _draw_barcode
+            why = draw(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
+            if why:
+                blank.append({"i": i, "type": kind, "why": why})
         elif kind == "rect":
             _draw_rect(mask, el)
         else:
@@ -331,7 +339,7 @@ def render(layout, record=None, keep_missing=True, chain=()):
 
     if red_downgraded:
         warnings.append("This tape is black-only; red elements print in black")
-    return img, warnings
+    return img, warnings, blank
 
 
 def print_image(layout, img):

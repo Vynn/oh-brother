@@ -88,7 +88,7 @@ def create_app(data_dir):
         b = body()
         layout = b.get("layout", {})
         try:
-            img, warnings = render.render(layout, b.get("record"), keep_missing=True, chain=set(b.get("chain") or ()))
+            img, warnings, blank = render.render(layout, b.get("record"), keep_missing=True, chain=set(b.get("chain") or ()))
         except Exception as e:
             return jsonify(error=str(e)), 400
         buf = io.BytesIO()
@@ -97,6 +97,7 @@ def create_app(data_dir):
             "Cache-Control": "no-store",
             "X-Warnings": quote(json.dumps(warnings)),
             "X-Placeholders": quote(json.dumps(render.placeholders(layout))),
+            "X-Blank": quote(json.dumps(blank)),
         })
 
     @app.post("/api/print")
@@ -111,11 +112,17 @@ def create_app(data_dir):
         if not cfg["printer_host"] and not dry_run:
             return jsonify(error="Set the printer address first"), 400
 
-        images, warnings = [], []
+        images, warnings, blanks = [], [], {}
         for rec in records:
-            img, w = render.render(layout, rec, keep_missing=False, chain=chain)
+            img, w, blank = render.render(layout, rec, keep_missing=False, chain=chain)
             warnings += [x for x in w if x not in warnings]
             images += [img] * copies
+            for b in blank:   # count labels printed with a blank code
+                key = (b["type"], b["why"])
+                blanks[key] = blanks.get(key, 0) + copies
+        for (kind, why), n in blanks.items():
+            name = "QR code" if kind == "qr" else "Barcode"
+            warnings.append(f"{name} {why} on {n} label{'' if n == 1 else 's'}; printed blank")
         try:
             job = printer.build_job(layout, images, cfg["model"], cut=b.get("cut", True))
         except Exception as e:

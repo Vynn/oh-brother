@@ -2,11 +2,15 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
-## 0.2.0 · unreleased
+## 0.2.0 · 2026-10-29
+
+Undo, and more quick layouts that adapt to the label.
 
 ### Added
 
 - Undo and redo for every change to the label: Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y, plus buttons in the top bar. The last 100 steps are kept. A drag or a burst of typing counts as one step.
+- Eleven quick layouts: Two columns, QR only, Bin label, Date stamp, Filament spool, Cable flag, Return address, and price and sale tags with a barcode or QR code.
+- Quick layouts are grouped into collapsible categories, each showing how many of its layouts fit the current label. Open categories are remembered.
 
 ### Changed
 
@@ -15,6 +19,7 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 - Quick-layout thumbnails are drawn at the current label's shape. Layouts that can't fit are greyed out, with the reason in a tooltip.
 - Quick layouts share field names: `{{Title}}`, `{{Body}}` and `{{Code}}`. Switching layouts keeps typed values.
 - Applying a quick layout no longer asks for confirmation; undo restores the previous layout.
+- The sample CSV and the *Bin label* template use a `Code` column instead of `SKU`, matching the quick layouts.
 
 ## 0.1.2 · 2026-10-29
 

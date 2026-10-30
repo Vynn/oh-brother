@@ -167,7 +167,9 @@ const T = (o) => ({ type: "text", color: "black", font: "sans", bold: false, siz
 // Quick layouts. make(W, H) builds the elements for a printable area of W x H
 // mm, picking an arrangement from its shape: "thin" labels (long strips, such
 // as 12 mm tape run along) put parts side by side; "tall" ones stack them.
-// fits(W, H) returns "" or the reason the layout can't work at that size.
+// fits(W, H, red) returns "" or the reason the layout can't work at that size
+// (or tape); without one, the built elements are checked by checkEls().
+// cat is the layout's category in the panel (CATS).
 // Field names are shared ({{Title}}, {{Body}}, {{Code}}) so values carry over
 // when switching layouts.
 
@@ -177,13 +179,96 @@ const shapeOf = (W, H) => W / H >= 2.8 ? "thin" : H / W >= 1.4 ? "tall" : "norma
 const QR = (o) => ({ type: "qr", color: "black", data: "{{Code}}", ec: "M", ...o });
 const BAR = (o) => ({ type: "barcode", color: "black", data: "{{Code}}", show_text: true, ...o });
 
+const RULE = (o) => ({ type: "rect", color: "black", fill: true, stroke_mm: 0.3, ...o });
+
+// Generic size check for a built layout: scannable codes, readable text
+function checkEls(els) {
+  for (const e of els) {
+    if (e.type === "qr" && e.w < 7) return "Too small for a scannable QR code";
+    if (e.type === "barcode" && e.w < 20) return "Needs a longer label for a barcode";
+    if (e.type === "barcode" && e.h < 5) return "Needs a taller label for a barcode";
+    if (e.type === "text" && (e.h < 2 || e.w < 5)) return "Needs a larger label";
+  }
+  return "";
+}
+const NEEDS_RED = "Needs black and red tape (DK-2251)";
+
+// Price tags: the plain ones are black; the sale ones add a red SALE banner
+// and a red price. Fields: {{Title}}, {{Price}}, {{Code}} (the SKU).
+function priceTag(code, sale) {
+  const qr = code === "qr";
+  const price = (o) => T({ text: "{{Price}}", bold: true, align: "center", wrap: false, ...(sale ? { color: "red" } : {}), ...o });
+  const sku = (o) => T({ text: "SKU {{Code}}", size: 0, wrap: false, ...o });
+  const banner = (o) => T({ text: "SALE", bold: true, align: "center", invert: true, color: "red", wrap: false, ...o });
+  const make = (W, H, m = marginFor(W, H)) => {
+    const els = [];
+    if (shapeOf(W, H) === "thin") {
+      // Left to right: [SALE] | title | price | code
+      let x = 0;
+      if (sale) { const bw = Math.min(W * 0.16, H * 1.8); els.push(banner({ x: 0, y: 0, w: bw, h: H, padding_mm: Math.min(1, m) })); x = bw; }
+      x += m;
+      const ih = H - 2 * m, avail = W - x - m;
+      const cw = qr ? ih : Math.min(avail * 0.42, 50);
+      const text = avail - cw - 2 * m, tw = text * 0.55, pw = text - tw;
+      // The SKU goes under the title: text under the bars would be too small
+      els.push(T({ x, y: m, w: tw, h: ih * 0.62, text: "{{Title}}", bold: true }),
+        sku({ x, y: m + ih * 0.62, w: tw, h: ih * 0.38 }),
+        price({ x: x + tw + m, y: m, w: pw, h: ih }));
+      const cx = W - m - cw;
+      els.push(qr ? QR({ x: cx, y: m, w: cw, h: cw }) : BAR({ x: cx, y: m, w: cw, h: ih, show_text: false }));
+      return els;
+    }
+    let top = m;
+    if (sale) { const bh = Math.min(Math.max(H * 0.18, 4), 9); els.push(banner({ x: 0, y: 0, w: W, h: bh })); top = bh + m; }
+    const ih = H - top - m, iw = W - 2 * m;
+    if (shapeOf(W, H) === "tall") {
+      // Stacked: title, price, code, SKU
+      const th = ih * 0.2, ph = ih * 0.22, sh = ih * 0.1;
+      const ch = ih - th - ph - sh - 3 * m;
+      let y = top;
+      els.push(T({ x: m, y, w: iw, h: th, text: "{{Title}}", bold: true, align: "center" })); y += th + m;
+      els.push(price({ x: m, y, w: iw, h: ph })); y += ph + m;
+      if (qr) { const s = Math.min(iw, ch); els.push(QR({ x: (W - s) / 2, y, w: s, h: s })); }
+      else els.push(BAR({ x: m, y, w: iw, h: Math.min(ch, 15), show_text: false }));
+      y += ch + m;
+      els.push(sku({ x: m, y, w: iw, h: sh, align: "center" }));
+      return els;
+    }
+    if (qr) {
+      // QR code down the right; title, price and SKU stacked beside it
+      const s = Math.min(ih, W * 0.4), tw = iw - s - m;
+      els.push(T({ x: m, y: top, w: tw, h: ih * 0.32, text: "{{Title}}", bold: true }),
+        price({ x: m, y: top + ih * 0.34, w: tw, h: ih * 0.44, align: "left" }),
+        sku({ x: m, y: top + ih * 0.8, w: tw, h: ih * 0.2 }),
+        QR({ x: W - m - s, y: top + (ih - s) / 2, w: s, h: s }));
+      return els;
+    }
+    // Title across the top, price and barcode side by side, SKU at the bottom
+    const th = ih * 0.28, sh = ih * 0.16, mh = ih - th - sh - 2 * m;
+    const pw = iw * 0.38;
+    els.push(T({ x: m, y: top, w: iw, h: th, text: "{{Title}}", bold: true }),
+      price({ x: m, y: top + th + m, w: pw, h: mh, align: "left" }),
+      BAR({ x: 2 * m + pw, y: top + th + m, w: iw - pw - m, h: mh, show_text: false }),
+      sku({ x: m, y: top + th + mh + 2 * m, w: iw, h: sh }));
+    return els;
+  };
+  return { name: `${sale ? "Sale" : "Price"} tag + ${qr ? "QR" : "barcode"}`, cat: "retail", make,
+    fits: (W, H, red) => sale && !red ? NEEDS_RED
+      : shapeOf(W, H) !== "thin" && Math.min(W, H) < 20 ? "Needs a larger label" : checkEls(make(W, H)) };
+}
+
+// Quick-layout categories, in panel order
+const CATS = [["basic", "Basic"], ["storage", "Storage and inventory"], ["dates", "Dates and tracking"],
+  ["cables", "Cables and mailing"], ["retail", "Retail"]];
+
 const PRESETS = [
-  { name: "Single line",
+  // ---- Basic ----
+  { name: "Single line", cat: "basic",
     fits: () => "",
     make: (W, H, m = marginFor(W, H)) => [
       T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Title}}", bold: true, align: "center", wrap: false })] },
 
-  { name: "Title + body",
+  { name: "Title + body", cat: "basic",
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
     make: (W, H, m = marginFor(W, H)) => {
       if (shapeOf(W, H) === "thin") {
@@ -197,7 +282,7 @@ const PRESETS = [
         T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{Body}}", valign: "top" })];
     } },
 
-  { name: "Red header",
+  { name: "Red header", cat: "basic",
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
     make: (W, H, m = marginFor(W, H)) => {
       const head = { text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
@@ -210,7 +295,25 @@ const PRESETS = [
       return [T({ ...head, x: 0, y: 0, w: W, h: bh }), T({ x: m, y: bh + m, w: W - 2 * m, h: H - bh - 2 * m, text: "{{Body}}" })];
     } },
 
-  { name: "Text + QR",
+  { name: "Two columns", cat: "basic",
+    fits: (W, H) => shapeOf(W, H) === "tall" ? (H < 16 ? "Needs a larger label" : "") : (W < 20 ? "Needs a wider label" : ""),
+    make: (W, H, m = marginFor(W, H)) => {
+      const col = { bold: true, align: "center" }, rule = 0.3;
+      if (shapeOf(W, H) === "tall") {
+        // Narrow labels: two rows with a rule between
+        const rh = (H - 4 * m - rule) / 2;
+        return [T({ ...col, x: m, y: m, w: W - 2 * m, h: rh, text: "{{Title}}" }),
+          RULE({ x: m, y: (H - rule) / 2, w: W - 2 * m, h: rule }),
+          T({ ...col, x: m, y: H - m - rh, w: W - 2 * m, h: rh, text: "{{Body}}" })];
+      }
+      const cw = (W - 4 * m - rule) / 2;
+      return [T({ ...col, x: m, y: m, w: cw, h: H - 2 * m, text: "{{Title}}" }),
+        RULE({ x: (W - rule) / 2, y: m, w: rule, h: H - 2 * m }),
+        T({ ...col, x: W - m - cw, y: m, w: cw, h: H - 2 * m, text: "{{Body}}" })];
+    } },
+
+  // ---- Storage and inventory ----
+  { name: "Text + QR", cat: "storage",
     fits: (W, H) => {
       const m = marginFor(W, H);
       const s = shapeOf(W, H) === "tall" ? Math.min(W - 2 * m, H * 0.6) : Math.min(H - 2 * m, W * 0.45);
@@ -228,7 +331,7 @@ const PRESETS = [
         QR({ x: W - s - m, y: (H - s) / 2, w: s, h: s })];
     } },
 
-  { name: "Barcode",
+  { name: "Barcode", cat: "storage",
     fits: (W, H) => {
       const m = marginFor(W, H), thin = shapeOf(W, H) === "thin";
       const bw = thin ? (W - 3 * m) * 0.7 : W - 2 * m;
@@ -248,10 +351,108 @@ const PRESETS = [
         BAR({ x: m, y: y0 + th + m, w: W - 2 * m, h: bh })];
     } },
 
-  { name: "Address",
+  { name: "QR only", cat: "storage",
+    make: (W, H, m = marginFor(W, H)) => {
+      const ih = H - 2 * m, iw = W - 2 * m;
+      if (W / H >= 1.5) {
+        // Wide: QR code at the start, caption beside it
+        const s = Math.min(ih, iw * 0.6);
+        return [QR({ x: m, y: (H - s) / 2, w: s, h: s }),
+          T({ x: 2 * m + s, y: m, w: iw - s - m, h: ih, text: "{{Title}}", size: 0 })];
+      }
+      // Caption under the QR code, the pair centred
+      const ch = Math.max(3, ih * 0.16), s = Math.min(iw, ih - ch - m);
+      const y0 = m + (ih - s - m - ch) / 2;
+      return [QR({ x: (W - s) / 2, y: y0, w: s, h: s }),
+        T({ x: m, y: y0 + s + m, w: iw, h: ch, text: "{{Title}}", align: "center", wrap: false })];
+    } },
+
+  { name: "Bin label", cat: "storage",
+    make: (W, H, m = marginFor(W, H)) => {
+      const ih = H - 2 * m, iw = W - 2 * m, rule = 0.3;
+      // A small location line over a rule, the item name below
+      const stack = (x, y, w, hh) => {
+        const bh = hh * 0.3;
+        return [T({ x, y, w, h: bh, text: "{{Body}}", wrap: false }),
+          RULE({ x, y: y + bh + m / 2, w, h: rule }),
+          T({ x, y: y + bh + m + rule, w, h: hh - bh - m - rule, text: "{{Title}}", bold: true })];
+      };
+      if (shapeOf(W, H) === "tall") {
+        const s = Math.min(iw, H * 0.5);
+        return [...stack(m, m, iw, ih - s - m), QR({ x: (W - s) / 2, y: H - m - s, w: s, h: s })];
+      }
+      if (shapeOf(W, H) === "thin" && H < 14) {
+        // Too low to stack: item name, a rule, the location, then the QR code
+        const tw = (iw - ih - 3 * m - rule) * 0.6, bx = 3 * m + tw + rule;
+        return [T({ x: m, y: m, w: tw, h: ih, text: "{{Title}}", bold: true }),
+          RULE({ x: 2 * m + tw, y: m, w: rule, h: ih }),
+          T({ x: bx, y: m, w: W - 2 * m - ih - bx, h: ih, text: "{{Body}}" }),
+          QR({ x: W - m - ih, y: m, w: ih, h: ih })];
+      }
+      const s = Math.min(ih, W * 0.4);
+      return [...stack(m, m, iw - s - m, ih), QR({ x: W - m - s, y: (H - s) / 2, w: s, h: s })];
+    } },
+
+  // ---- Dates and tracking ----
+  { name: "Date stamp", cat: "dates",
+    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 25 ? "Needs a longer label" : "") : (H < 8 ? "Needs a larger label" : ""),
+    make: (W, H, m = marginFor(W, H)) => {
+      const ih = H - 2 * m, iw = W - 2 * m, date = { text: "Opened {{date}}", wrap: false };
+      if (shapeOf(W, H) === "thin") {
+        const tw = (iw - m) * 0.55;
+        return [T({ x: m, y: m, w: tw, h: ih, text: "{{Title}}", bold: true }),
+          T({ ...date, x: 2 * m + tw, y: m, w: iw - tw - m, h: ih, align: "right" })];
+      }
+      const th = (ih - m) * 0.6;
+      return [T({ x: m, y: m, w: iw, h: th, text: "{{Title}}", bold: true }),
+        T({ ...date, x: m, y: 2 * m + th, w: iw, h: ih - th - m })];
+    } },
+
+  { name: "Filament spool", cat: "dates",
+    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 14 || W < 20 ? "Needs a larger label" : ""),
+    make: (W, H, m = marginFor(W, H)) => {
+      // Material in a red band, colour below it, drying date last
+      const band = { text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
+      const date = { text: "Dried {{date}}", wrap: false };
+      if (shapeOf(W, H) === "thin") {
+        const bw = W * 0.28, rest = W - bw - 3 * m, cw = rest * 0.5;
+        return [T({ ...band, x: 0, y: 0, w: bw, h: H }),
+          T({ x: bw + m, y: m, w: cw, h: H - 2 * m, text: "{{Body}}" }),
+          T({ ...date, x: bw + 2 * m + cw, y: m, w: rest - cw, h: H - 2 * m, align: "right" })];
+      }
+      const bh = Math.min(H * 0.35, W * 0.3), rest = H - bh - 3 * m;
+      return [T({ ...band, x: 0, y: 0, w: W, h: bh }),
+        T({ x: m, y: bh + m, w: W - 2 * m, h: rest * 0.6, text: "{{Body}}", bold: true }),
+        T({ ...date, x: m, y: bh + 2 * m + rest * 0.6, w: W - 2 * m, h: rest * 0.4 })];
+    } },
+
+  // ---- Cables and mailing ----
+  { name: "Cable flag", cat: "cables",
+    fits: (W, H) => Math.max(W, H) < 45 ? "Needs a label at least 45 mm long" : "",
+    make: (W, H, m = marginFor(W, H)) => {
+      // The same text on both halves; the blank middle wraps around the
+      // cable (15 mm suits cables up to about 4.5 mm across) and the halves
+      // stick together back to back
+      const WRAP = 15, along = W >= H, L = along ? W : H, half = (L - WRAP) / 2;
+      const t = { text: "{{Title}}", bold: true, align: "center" };
+      return [0, half + WRAP].map((p) => along
+        ? T({ ...t, x: p + m, y: m, w: half - 2 * m, h: H - 2 * m })
+        : T({ ...t, x: m, y: p + m, w: W - 2 * m, h: half - 2 * m }));
+    } },
+
+  { name: "Address", cat: "cables",
     fits: (W, H) => H < 14 || W < 25 ? "Needs a larger label" : "",
     make: (W, H, m = marginFor(W, H)) => [
       T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}\n{{Country}}", valign: "top", wrap: false })] },
+
+  { name: "Return address", cat: "cables",
+    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 8 || W < 20 ? "Needs a larger label" : ""),
+    make: (W, H, m = marginFor(W, H)) => [
+      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, wrap: false, size: 0,
+        text: shapeOf(W, H) === "thin" ? "{{Name}} · {{Street}} · {{City}} {{Postcode}}" : "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}" })] },
+
+  // ---- Retail ----
+  priceTag("barcode", false), priceTag("qr", false), priceTag("barcode", true), priceTag("qr", true),
 ];
 
 // 0.01 mm, so full-width preset elements line up exactly with the label edges
@@ -283,6 +484,8 @@ function presetThumb(p, W, H) {
     } else if (e.type === "qr") {
       add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: "none", stroke: col, "stroke-width": e.w * 0.1 });
       add("rect", { x: e.x + e.w * 0.3, y: e.y + e.h * 0.3, width: e.w * 0.4, height: e.h * 0.4, fill: col });
+    } else if (e.type === "rect") {
+      add("rect", { x: e.x, y: e.y, width: Math.max(e.w, 0.4 * k), height: Math.max(e.h, 0.4 * k), fill: col });
     } else if (e.type === "barcode") {
       for (let i = 0; i < 18; i++) add("rect", { x: e.x + (e.w / 18) * i, y: e.y, width: (e.w / 18) * (i % 3 ? 0.4 : 0.75), height: e.h * 0.8, fill: col });
     }
@@ -301,7 +504,7 @@ const BUILTIN = ["date", "time", "datetime"];
 const isFixed = (p) => !(S.csv && S.mapping[p]);
 
 // The layout's fields, plus any field named inside a fixed value, so that
-// {{SKU}} = "{{Item}}" gives Item a row even when the layout doesn't use it.
+// {{Code}} = "{{Item}}" gives Item a row even when the layout doesn't use it.
 // CSV column names are left out: those come straight from the row.
 function fields() {
   const out = [...S.placeholders];
@@ -933,16 +1136,38 @@ $("#orientation").addEventListener("click", (ev) => {
   if (v && v !== S.layout.orientation) reshape(() => { S.layout.orientation = v; });
 });
 
+// One collapsible section per category. Open sections are remembered in this
+// browser; only Basic is open the first time.
+const PRESETS_OPEN = "oh-brother:presets-open";
+const openCats = () => {
+  try { const j = JSON.parse(localStorage.getItem(PRESETS_OPEN) || "null"); if (Array.isArray(j)) return new Set(j); } catch {}
+  return new Set(["basic"]);
+};
+
 function drawPresets() {
-  const c = canvasMM();
-  $("#presets").replaceChildren(...PRESETS.map((p) => {
-    const why = p.fits(c.w, c.h);
-    return h("button", { type: "button", class: "preset", disabled: !!why, title: why || null, onclick: () => {
-      let els = roundAll(p.make(c.w, c.h));
-      if (!tape().red) els = els.map((e) => ({ ...e, color: "black" }));
-      S.layout.elements = els;
-      select(-1); schedule(); checkpoint();
-    } }, presetThumb(p, c.w, c.h), h("span", {}, p.name));
+  const c = canvasMM(), red = tape().red, open = openCats();
+  $("#presets").replaceChildren(...CATS.map(([id, label]) => {
+    const list = PRESETS.filter((p) => p.cat === id);
+    let fit = 0;
+    const btns = list.map((p) => {
+      const why = p.fits ? p.fits(c.w, c.h, red) : checkEls(p.make(c.w, c.h));
+      if (!why) fit++;
+      return h("button", { type: "button", class: "preset", disabled: !!why, title: why || null, onclick: () => {
+        let els = roundAll(p.make(c.w, c.h));
+        if (!red) els = els.map((e) => ({ ...e, color: "black" }));
+        S.layout.elements = els;
+        select(-1); schedule(); checkpoint();
+      } }, presetThumb(p, c.w, c.h), h("span", {}, p.name));
+    });
+    const d = h("details", { class: "preset-cat", open: open.has(id) || null },
+      h("summary", {}, h("span", {}, label), h("span", { class: "count" }, `${fit}/${list.length}`)),
+      h("div", { class: "presets" }, ...btns));
+    d.addEventListener("toggle", () => {
+      const now = openCats();
+      d.open ? now.add(id) : now.delete(id);
+      try { localStorage.setItem(PRESETS_OPEN, JSON.stringify([...now])); } catch {}
+    });
+    return d;
   }));
 }
 

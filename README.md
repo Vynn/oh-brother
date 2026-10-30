@@ -35,12 +35,12 @@ The app stops by itself about 10 seconds after you close its last window or tab,
 
 - **Label:** tape, length (continuous tape), and text direction (across or along the tape). The layout scales when these change.
 - **Units:** millimetres or inches, for every length you see or type. Templates work in either. The app remembers your choice.
-- **Quick layouts** replace the current elements with a starting layout, arranged for the label's shape: on long, narrow labels, parts sit side by side. The thumbnails show each layout as it would come out on the current label, and layouts that can't fit are greyed out. Values you've typed carry over, since the layouts share field names (`{{Title}}`, `{{Body}}`, `{{Code}}`, `{{Price}}`).
+- **Quick layouts** replace the current elements with a starting layout, arranged for the label's shape: on long, narrow labels, parts sit side by side. The thumbnails show each layout as it would come out on the current label, and layouts that can't fit are greyed out. Values you've typed carry over, since the layouts share field names (`{{title}}`, `{{body}}`, `{{code}}`, `{{price}}`).
   - **Basic:** single line, title and body, red header, two columns.
   - **Storage and inventory:** text and QR code, barcode, QR only, bin label.
   - **Dates and tracking:** date stamp ("Opened" and today's date), filament spool ("Dried" and today's date).
   - **Cables and mailing:** cable flag, address, return address. The cable flag prints the text twice with 15 mm of blank tape between, which wraps around a cable up to about 4.5 mm thick; the two ends stick together back to back.
-  - **Retail:** price tags in black, and sale tags with a red banner and price, each with a barcode or QR code of the SKU (`{{Code}}`). Sale tags need red tape.
+  - **Retail:** price tags in black, and sale tags with a red banner and price, each with a barcode or QR code of the SKU (`{{code}}`). Sale tags need red tape.
 - **Undo:** Ctrl+Z, or the arrows in the top bar, undoes the last 100 changes. Redo with Ctrl+Shift+Z or Ctrl+Y. Inside a text box, these keys undo typing in that box.
 - **Editor:** the label is shown at its cut size. The dashed line is the printable area.
 - **Elements:** text, QR code, Code 128 barcode, and box or line, each in black or red.
@@ -54,8 +54,8 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Align them to each other (Selection) or to the printable area (Label).
   - Distribute three or more with equal gaps. The outermost two stay put.
   - Colour, Duplicate and Delete apply to all of them.
-- **Fields:** `{{Name}}` in any text, QR code or barcode becomes a field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
-  - Fixed text can include other fields: set Code to `{{Item}}` or `P-{{Item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
+- **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
+  - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
   - Values from CSV cells are printed exactly as written, `{{…}}` included.
   - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
 - **CSV:** load a file, map fields to columns, click a row to preview it, and tick the rows to print.

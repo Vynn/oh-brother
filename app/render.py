@@ -97,12 +97,16 @@ def canvas_dots(layout):
 # --------------------------------------------------------------------------
 
 def placeholders(layout):
-    """Unique placeholder names used anywhere in the layout, in order."""
-    seen = []
+    """Unique placeholder names used anywhere in the layout, in order.
+
+    Names are case-insensitive: each is listed once, as first spelled.
+    """
+    seen, keys = [], set()
     for el in layout.get("elements", []):
         for key in ("text", "data"):
             for m in PLACEHOLDER.finditer(str(el.get(key, ""))):
-                if m.group(1) not in seen:
+                if m.group(1).lower() not in keys:
+                    keys.add(m.group(1).lower())
                     seen.append(m.group(1))
     return seen
 
@@ -114,14 +118,18 @@ def fill(template, record, keep_missing, chain=(), warnings=None):
     themselves contain {{Name}} and are filled in turn. Other values (CSV
     cells) are used exactly as they are. A field that refers back to itself,
     directly or through others, is left as its tag and reported.
+    Names are case-insensitive: {{Code}}, {{code}} and {{CODE}} are one field.
     """
+    # Later keys win, so the record's fields override same-named CSV columns
+    record = {str(k).lower(): v for k, v in record.items()}
+    chain = {str(c).lower() for c in chain}
     now = datetime.datetime.now()
     builtins = {"date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H:%M"),
                 "datetime": now.strftime("%Y-%m-%d %H:%M")}
 
     def expand(text, path):
         def sub(m):
-            key = m.group(1)
+            key = m.group(1).lower()
             if key in path:
                 if warnings is not None:
                     msg = "Fields refer to each other in a loop: " + " → ".join(

@@ -2,6 +2,13 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## Unreleased
+
+### Changed
+
+- Field names ignore case: `{{Code}}`, `{{code}}` and `{{CODE}}` are the same field, and so are built-ins such as `{{Date}}` and CSV columns named in fixed text. The Data table lists each field once, as first spelled. Templates and saved work from earlier versions are converted when loaded.
+- Quick layouts and the hints use lowercase field names (`{{title}}`, `{{body}}`, `{{code}}`, `{{price}}`), matching the built-ins.
+
 ## 0.2.2 · 2026-10-30
 
 Code placeholders, and the app closes with its window.

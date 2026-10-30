@@ -57,7 +57,7 @@ Snapping works in millimetres. Targets are the printable area's edges and centre
 
 The browser builds one record per label. A record holds the CSV row's columns, if a CSV is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.
 
-`render.fill()` replaces each `{{Name}}`. A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path.
+`render.fill()` replaces each `{{name}}` (names are case-insensitive). A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path.
 
 ## Screenshots
 

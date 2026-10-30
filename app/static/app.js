@@ -38,7 +38,7 @@ const S = {
   pick: new Set(),      // selected element indexes
   editing: -1,          // element whose text field has focus
   alignTo: "selection", // several selected: align to "selection" or "label"
-  fixed: {},            // placeholder -> fixed text
+  fixed: {},            // field key (lowercase) -> fixed text
   csv: null,            // {headers, rows}
   mapping: {},          // placeholder -> column name ("" = fixed text)
   picked: new Set(),    // selected CSV row indexes
@@ -57,7 +57,7 @@ addEventListener("pagehide", save);
 const restore = () => {
   try {
     const j = JSON.parse(localStorage.getItem(STORE) || "null");
-    if (j?.layout) { S.layout = j.layout; S.fixed = j.fixed || {}; return true; }
+    if (j?.layout) { S.layout = j.layout; S.fixed = lowerKeys(j.fixed); return true; }
   } catch {}
   return false;
 };
@@ -173,8 +173,8 @@ function newElement(type) {
   const base = { type, color: "black", x: 2, y: 2 };
   switch (type) {
     case "text": return { ...base, w: r1(c.w - 4), h: r1(Math.min(12, c.h - 4)), text: "Text", font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0 };
-    case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{Code}}", ec: "M" }; }
-    case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{Code}}", show_text: true };
+    case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{code}}", ec: "M" }; }
+    case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", show_text: true };
     case "rect": return { ...base, w: r1(c.w - 4), h: 1, fill: true, stroke_mm: 0.5 };
   }
 }
@@ -187,14 +187,14 @@ const T = (o) => ({ type: "text", color: "black", font: "sans", bold: false, siz
 // fits(W, H, red) returns "" or the reason the layout can't work at that size
 // (or tape); without one, the built elements are checked by checkEls().
 // cat is the layout's category in the panel (CATS).
-// Field names are shared ({{Title}}, {{Body}}, {{Code}}) so values carry over
+// Field names are shared ({{title}}, {{body}}, {{code}}) so values carry over
 // when switching layouts.
 
 // Margin scales with the short side: 2 mm on 62 mm tape, 0.5 mm on 12 mm
 const marginFor = (W, H) => Math.max(0.5, Math.min(2, Math.round(Math.min(W, H) * 0.14) / 2));
 const shapeOf = (W, H) => W / H >= 2.8 ? "thin" : H / W >= 1.4 ? "tall" : "normal";
-const QR = (o) => ({ type: "qr", color: "black", data: "{{Code}}", ec: "M", ...o });
-const BAR = (o) => ({ type: "barcode", color: "black", data: "{{Code}}", show_text: true, ...o });
+const QR = (o) => ({ type: "qr", color: "black", data: "{{code}}", ec: "M", ...o });
+const BAR = (o) => ({ type: "barcode", color: "black", data: "{{code}}", show_text: true, ...o });
 
 const RULE = (o) => ({ type: "rect", color: "black", fill: true, stroke_mm: 0.3, ...o });
 
@@ -211,11 +211,11 @@ function checkEls(els) {
 const NEEDS_RED = "Needs black and red tape (DK-2251)";
 
 // Price tags: the plain ones are black; the sale ones add a red SALE banner
-// and a red price. Fields: {{Title}}, {{Price}}, {{Code}} (the SKU).
+// and a red price. Fields: {{title}}, {{price}}, {{code}} (the SKU).
 function priceTag(code, sale) {
   const qr = code === "qr";
-  const price = (o) => T({ text: "{{Price}}", bold: true, align: "center", wrap: false, ...(sale ? { color: "red" } : {}), ...o });
-  const sku = (o) => T({ text: "SKU {{Code}}", size: 0, wrap: false, ...o });
+  const price = (o) => T({ text: "{{price}}", bold: true, align: "center", wrap: false, ...(sale ? { color: "red" } : {}), ...o });
+  const sku = (o) => T({ text: "SKU {{code}}", size: 0, wrap: false, ...o });
   const banner = (o) => T({ text: "SALE", bold: true, align: "center", invert: true, color: "red", wrap: false, ...o });
   const make = (W, H, m = marginFor(W, H)) => {
     const els = [];
@@ -228,7 +228,7 @@ function priceTag(code, sale) {
       const cw = qr ? ih : Math.min(avail * 0.42, 50);
       const text = avail - cw - 2 * m, tw = text * 0.55, pw = text - tw;
       // The SKU goes under the title: text under the bars would be too small
-      els.push(T({ x, y: m, w: tw, h: ih * 0.62, text: "{{Title}}", bold: true }),
+      els.push(T({ x, y: m, w: tw, h: ih * 0.62, text: "{{title}}", bold: true }),
         sku({ x, y: m + ih * 0.62, w: tw, h: ih * 0.38 }),
         price({ x: x + tw + m, y: m, w: pw, h: ih }));
       const cx = W - m - cw;
@@ -243,7 +243,7 @@ function priceTag(code, sale) {
       const th = ih * 0.2, ph = ih * 0.22, sh = ih * 0.1;
       const ch = ih - th - ph - sh - 3 * m;
       let y = top;
-      els.push(T({ x: m, y, w: iw, h: th, text: "{{Title}}", bold: true, align: "center" })); y += th + m;
+      els.push(T({ x: m, y, w: iw, h: th, text: "{{title}}", bold: true, align: "center" })); y += th + m;
       els.push(price({ x: m, y, w: iw, h: ph })); y += ph + m;
       if (qr) { const s = Math.min(iw, ch); els.push(QR({ x: (W - s) / 2, y, w: s, h: s })); }
       else els.push(BAR({ x: m, y, w: iw, h: Math.min(ch, 15), show_text: false }));
@@ -254,7 +254,7 @@ function priceTag(code, sale) {
     if (qr) {
       // QR code down the right; title, price and SKU stacked beside it
       const s = Math.min(ih, W * 0.4), tw = iw - s - m;
-      els.push(T({ x: m, y: top, w: tw, h: ih * 0.32, text: "{{Title}}", bold: true }),
+      els.push(T({ x: m, y: top, w: tw, h: ih * 0.32, text: "{{title}}", bold: true }),
         price({ x: m, y: top + ih * 0.34, w: tw, h: ih * 0.44, align: "left" }),
         sku({ x: m, y: top + ih * 0.8, w: tw, h: ih * 0.2 }),
         QR({ x: W - m - s, y: top + (ih - s) / 2, w: s, h: s }));
@@ -263,7 +263,7 @@ function priceTag(code, sale) {
     // Title across the top, price and barcode side by side, SKU at the bottom
     const th = ih * 0.28, sh = ih * 0.16, mh = ih - th - sh - 2 * m;
     const pw = iw * 0.38;
-    els.push(T({ x: m, y: top, w: iw, h: th, text: "{{Title}}", bold: true }),
+    els.push(T({ x: m, y: top, w: iw, h: th, text: "{{title}}", bold: true }),
       price({ x: m, y: top + th + m, w: pw, h: mh, align: "left" }),
       BAR({ x: 2 * m + pw, y: top + th + m, w: iw - pw - m, h: mh, show_text: false }),
       sku({ x: m, y: top + th + mh + 2 * m, w: iw, h: sh }));
@@ -283,7 +283,7 @@ const PRESETS = [
   { name: "Single line", cat: "basic",
     fits: () => "",
     make: (W, H, m = marginFor(W, H)) => [
-      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Title}}", bold: true, align: "center", wrap: false })] },
+      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{title}}", bold: true, align: "center", wrap: false })] },
 
   { name: "Title + body", cat: "basic",
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
@@ -291,25 +291,25 @@ const PRESETS = [
       if (shapeOf(W, H) === "thin") {
         const tw = (W - 3 * m) * 0.4;
         return [
-          T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{Title}}", bold: true }),
-          T({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m, text: "{{Body}}" })];
+          T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{title}}", bold: true }),
+          T({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m, text: "{{body}}" })];
       }
       return [
-        T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.4, text: "{{Title}}", bold: true }),
-        T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{Body}}", valign: "top" })];
+        T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.4, text: "{{title}}", bold: true }),
+        T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{body}}", valign: "top" })];
     } },
 
   { name: "Red header", cat: "basic",
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
     make: (W, H, m = marginFor(W, H)) => {
-      const head = { text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
+      const head = { text: "{{title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
       if (shapeOf(W, H) === "thin") {
         // Red block at the start of the strip
         const bw = W * 0.35;
-        return [T({ ...head, x: 0, y: 0, w: bw, h: H }), T({ x: bw + m, y: m, w: W - bw - 2 * m, h: H - 2 * m, text: "{{Body}}" })];
+        return [T({ ...head, x: 0, y: 0, w: bw, h: H }), T({ x: bw + m, y: m, w: W - bw - 2 * m, h: H - 2 * m, text: "{{body}}" })];
       }
       const bh = Math.min(H * 0.32, W * 0.3);
-      return [T({ ...head, x: 0, y: 0, w: W, h: bh }), T({ x: m, y: bh + m, w: W - 2 * m, h: H - bh - 2 * m, text: "{{Body}}" })];
+      return [T({ ...head, x: 0, y: 0, w: W, h: bh }), T({ x: m, y: bh + m, w: W - 2 * m, h: H - bh - 2 * m, text: "{{body}}" })];
     } },
 
   { name: "Two columns", cat: "basic",
@@ -319,14 +319,14 @@ const PRESETS = [
       if (shapeOf(W, H) === "tall") {
         // Narrow labels: two rows with a rule between
         const rh = (H - 4 * m - rule) / 2;
-        return [T({ ...col, x: m, y: m, w: W - 2 * m, h: rh, text: "{{Title}}" }),
+        return [T({ ...col, x: m, y: m, w: W - 2 * m, h: rh, text: "{{title}}" }),
           RULE({ x: m, y: (H - rule) / 2, w: W - 2 * m, h: rule }),
-          T({ ...col, x: m, y: H - m - rh, w: W - 2 * m, h: rh, text: "{{Body}}" })];
+          T({ ...col, x: m, y: H - m - rh, w: W - 2 * m, h: rh, text: "{{body}}" })];
       }
       const cw = (W - 4 * m - rule) / 2;
-      return [T({ ...col, x: m, y: m, w: cw, h: H - 2 * m, text: "{{Title}}" }),
+      return [T({ ...col, x: m, y: m, w: cw, h: H - 2 * m, text: "{{title}}" }),
         RULE({ x: (W - rule) / 2, y: m, w: rule, h: H - 2 * m }),
-        T({ ...col, x: W - m - cw, y: m, w: cw, h: H - 2 * m, text: "{{Body}}" })];
+        T({ ...col, x: W - m - cw, y: m, w: cw, h: H - 2 * m, text: "{{body}}" })];
     } },
 
   // ---- Storage and inventory ----
@@ -340,11 +340,11 @@ const PRESETS = [
       if (shapeOf(W, H) === "tall") {
         // Text on top, QR code centred below
         const s = Math.min(W - 2 * m, H * 0.6);
-        return [T({ x: m, y: m, w: W - 2 * m, h: H - s - 3 * m, text: "{{Title}}", bold: true, align: "center" }),
+        return [T({ x: m, y: m, w: W - 2 * m, h: H - s - 3 * m, text: "{{title}}", bold: true, align: "center" }),
           QR({ x: (W - s) / 2, y: H - s - m, w: s, h: s })];
       }
       const s = Math.min(H - 2 * m, W * 0.45);
-      return [T({ x: m, y: m, w: W - s - 3 * m, h: H - 2 * m, text: "{{Title}}", bold: true }),
+      return [T({ x: m, y: m, w: W - s - 3 * m, h: H - 2 * m, text: "{{title}}", bold: true }),
         QR({ x: W - s - m, y: (H - s) / 2, w: s, h: s })];
     } },
 
@@ -357,14 +357,14 @@ const PRESETS = [
     make: (W, H, m = marginFor(W, H)) => {
       if (shapeOf(W, H) === "thin") {
         const tw = (W - 3 * m) * 0.3;
-        return [T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{Title}}", bold: true }),
+        return [T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{title}}", bold: true }),
           BAR({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m })];
       }
       // Title above the barcode; on tall labels both keep sensible heights
       const ih = H - 2 * m;
       const th = Math.min(ih * 0.3, 12), bh = Math.min(ih - th - m, (W - 2 * m) * 0.5);
       const y0 = m + (ih - th - m - bh) / 2;
-      return [T({ x: m, y: y0, w: W - 2 * m, h: th, text: "{{Title}}", bold: true, align: "center" }),
+      return [T({ x: m, y: y0, w: W - 2 * m, h: th, text: "{{title}}", bold: true, align: "center" }),
         BAR({ x: m, y: y0 + th + m, w: W - 2 * m, h: bh })];
     } },
 
@@ -375,13 +375,13 @@ const PRESETS = [
         // Wide: QR code at the start, caption beside it
         const s = Math.min(ih, iw * 0.6);
         return [QR({ x: m, y: (H - s) / 2, w: s, h: s }),
-          T({ x: 2 * m + s, y: m, w: iw - s - m, h: ih, text: "{{Title}}", size: 0 })];
+          T({ x: 2 * m + s, y: m, w: iw - s - m, h: ih, text: "{{title}}", size: 0 })];
       }
       // Caption under the QR code, the pair centred
       const ch = Math.max(3, ih * 0.16), s = Math.min(iw, ih - ch - m);
       const y0 = m + (ih - s - m - ch) / 2;
       return [QR({ x: (W - s) / 2, y: y0, w: s, h: s }),
-        T({ x: m, y: y0 + s + m, w: iw, h: ch, text: "{{Title}}", align: "center", wrap: false })];
+        T({ x: m, y: y0 + s + m, w: iw, h: ch, text: "{{title}}", align: "center", wrap: false })];
     } },
 
   { name: "Bin label", cat: "storage",
@@ -390,9 +390,9 @@ const PRESETS = [
       // A small location line over a rule, the item name below
       const stack = (x, y, w, hh) => {
         const bh = hh * 0.3;
-        return [T({ x, y, w, h: bh, text: "{{Body}}", wrap: false }),
+        return [T({ x, y, w, h: bh, text: "{{body}}", wrap: false }),
           RULE({ x, y: y + bh + m / 2, w, h: rule }),
-          T({ x, y: y + bh + m + rule, w, h: hh - bh - m - rule, text: "{{Title}}", bold: true })];
+          T({ x, y: y + bh + m + rule, w, h: hh - bh - m - rule, text: "{{title}}", bold: true })];
       };
       if (shapeOf(W, H) === "tall") {
         const s = Math.min(iw, H * 0.5);
@@ -401,9 +401,9 @@ const PRESETS = [
       if (shapeOf(W, H) === "thin" && H < 14) {
         // Too low to stack: item name, a rule, the location, then the QR code
         const tw = (iw - ih - 3 * m - rule) * 0.6, bx = 3 * m + tw + rule;
-        return [T({ x: m, y: m, w: tw, h: ih, text: "{{Title}}", bold: true }),
+        return [T({ x: m, y: m, w: tw, h: ih, text: "{{title}}", bold: true }),
           RULE({ x: 2 * m + tw, y: m, w: rule, h: ih }),
-          T({ x: bx, y: m, w: W - 2 * m - ih - bx, h: ih, text: "{{Body}}" }),
+          T({ x: bx, y: m, w: W - 2 * m - ih - bx, h: ih, text: "{{body}}" }),
           QR({ x: W - m - ih, y: m, w: ih, h: ih })];
       }
       const s = Math.min(ih, W * 0.4);
@@ -417,11 +417,11 @@ const PRESETS = [
       const ih = H - 2 * m, iw = W - 2 * m, date = { text: "Opened {{date}}", wrap: false };
       if (shapeOf(W, H) === "thin") {
         const tw = (iw - m) * 0.55;
-        return [T({ x: m, y: m, w: tw, h: ih, text: "{{Title}}", bold: true }),
+        return [T({ x: m, y: m, w: tw, h: ih, text: "{{title}}", bold: true }),
           T({ ...date, x: 2 * m + tw, y: m, w: iw - tw - m, h: ih, align: "right" })];
       }
       const th = (ih - m) * 0.6;
-      return [T({ x: m, y: m, w: iw, h: th, text: "{{Title}}", bold: true }),
+      return [T({ x: m, y: m, w: iw, h: th, text: "{{title}}", bold: true }),
         T({ ...date, x: m, y: 2 * m + th, w: iw, h: ih - th - m })];
     } },
 
@@ -429,17 +429,17 @@ const PRESETS = [
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 14 || W < 20 ? "Needs a larger label" : ""),
     make: (W, H, m = marginFor(W, H)) => {
       // Material in a red band, colour below it, drying date last
-      const band = { text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
+      const band = { text: "{{title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
       const date = { text: "Dried {{date}}", wrap: false };
       if (shapeOf(W, H) === "thin") {
         const bw = W * 0.28, rest = W - bw - 3 * m, cw = rest * 0.5;
         return [T({ ...band, x: 0, y: 0, w: bw, h: H }),
-          T({ x: bw + m, y: m, w: cw, h: H - 2 * m, text: "{{Body}}" }),
+          T({ x: bw + m, y: m, w: cw, h: H - 2 * m, text: "{{body}}" }),
           T({ ...date, x: bw + 2 * m + cw, y: m, w: rest - cw, h: H - 2 * m, align: "right" })];
       }
       const bh = Math.min(H * 0.35, W * 0.3), rest = H - bh - 3 * m;
       return [T({ ...band, x: 0, y: 0, w: W, h: bh }),
-        T({ x: m, y: bh + m, w: W - 2 * m, h: rest * 0.6, text: "{{Body}}", bold: true }),
+        T({ x: m, y: bh + m, w: W - 2 * m, h: rest * 0.6, text: "{{body}}", bold: true }),
         T({ ...date, x: m, y: bh + 2 * m + rest * 0.6, w: W - 2 * m, h: rest * 0.4 })];
     } },
 
@@ -451,7 +451,7 @@ const PRESETS = [
       // cable (15 mm suits cables up to about 4.5 mm across) and the halves
       // stick together back to back
       const WRAP = 15, along = W >= H, L = along ? W : H, half = (L - WRAP) / 2;
-      const t = { text: "{{Title}}", bold: true, align: "center" };
+      const t = { text: "{{title}}", bold: true, align: "center" };
       return [0, half + WRAP].map((p) => along
         ? T({ ...t, x: p + m, y: m, w: half - 2 * m, h: H - 2 * m })
         : T({ ...t, x: m, y: p + m, w: W - 2 * m, h: half - 2 * m }));
@@ -460,13 +460,13 @@ const PRESETS = [
   { name: "Address", cat: "cables",
     fits: (W, H) => H < 14 || W < 25 ? "Needs a larger label" : "",
     make: (W, H, m = marginFor(W, H)) => [
-      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}\n{{Country}}", valign: "top", wrap: false })] },
+      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{name}}\n{{street}}\n{{city}} {{postcode}}\n{{country}}", valign: "top", wrap: false })] },
 
   { name: "Return address", cat: "cables",
     fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 8 || W < 20 ? "Needs a larger label" : ""),
     make: (W, H, m = marginFor(W, H)) => [
       T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, wrap: false, size: 0,
-        text: shapeOf(W, H) === "thin" ? "{{Name}} · {{Street}} · {{City}} {{Postcode}}" : "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}" })] },
+        text: shapeOf(W, H) === "thin" ? "{{name}} · {{street}} · {{city}} {{postcode}}" : "{{name}}\n{{street}}\n{{city}} {{postcode}}" })] },
 
   // ---- Retail ----
   priceTag("barcode", false), priceTag("qr", false), priceTag("barcode", true), priceTag("qr", true),
@@ -517,18 +517,36 @@ function presetThumb(p, W, H) {
 const TAG = /\{\{\s*([^{}]+?)\s*\}\}/g;
 const BUILTIN = ["date", "time", "datetime"];
 
+// Field names are case-insensitive: {{Code}} and {{code}} are one field.
+// Values and column choices are stored under the lowercase key; the Data
+// table shows the name as first spelled in the layout.
+const fkey = (p) => p.toLowerCase();
+
+// Re-key a {name: value} object by lowercase name (older templates and saved
+// state used the spelling). Where two spellings collide, the first value set wins.
+function lowerKeys(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    const key = fkey(k);
+    if (!(key in out) || (out[key] === "" && v !== "")) out[key] = v;
+  }
+  return out;
+}
+
 // A field takes fixed text unless a CSV is loaded and it's mapped to a column
-const isFixed = (p) => !(S.csv && S.mapping[p]);
+const isFixed = (p) => !(S.csv && S.mapping[fkey(p)]);
 
 // The layout's fields, plus any field named inside a fixed value, so that
-// {{Code}} = "{{Item}}" gives Item a row even when the layout doesn't use it.
+// {{code}} = "{{item}}" gives Item a row even when the layout doesn't use it.
 // CSV column names are left out: those come straight from the row.
 function fields() {
-  const out = [...S.placeholders];
+  const out = [...S.placeholders], keys = new Set(out.map(fkey));
+  const cols = new Set((S.csv?.headers || []).map(fkey));
   for (let i = 0; i < out.length; i++) {
     if (!isFixed(out[i])) continue;
-    for (const m of (S.fixed[out[i]] || "").matchAll(TAG)) {
-      if (!out.includes(m[1]) && !BUILTIN.includes(m[1]) && !S.csv?.headers.includes(m[1])) out.push(m[1]);
+    for (const m of (S.fixed[fkey(out[i])] || "").matchAll(TAG)) {
+      const k = fkey(m[1]);
+      if (!keys.has(k) && !BUILTIN.includes(k) && !cols.has(k)) { keys.add(k); out.push(m[1]); }
     }
   }
   return out;
@@ -542,7 +560,7 @@ const chain = () => fields().filter(isFixed);
 function record(row) {
   const rec = row ? { ...row } : {};
   for (const p of fields()) {
-    rec[p] = isFixed(p) ? (S.fixed[p] ?? "") : (row?.[S.mapping[p]] ?? "");
+    rec[p] = isFixed(p) ? (S.fixed[fkey(p)] ?? "") : (row?.[S.mapping[fkey(p)]] ?? "");
   }
   return rec;
 }
@@ -552,9 +570,10 @@ const previewRecord = () => record(S.csv ? S.csv.rows[S.cur] : null);
 function autoMap() {
   if (!S.csv) return;
   for (const p of fields()) {
-    if (S.mapping[p] !== undefined && (S.mapping[p] === "" || S.csv.headers.includes(S.mapping[p]))) continue;
-    const hit = S.csv.headers.find((c) => c.toLowerCase() === p.toLowerCase());
-    S.mapping[p] = hit || "";
+    const m = S.mapping[fkey(p)];
+    if (m !== undefined && (m === "" || S.csv.headers.includes(m))) continue;
+    const hit = S.csv.headers.find((c) => fkey(c) === fkey(p));
+    S.mapping[fkey(p)] = hit || "";
   }
 }
 
@@ -1237,8 +1256,8 @@ async function drawTemplates() {
 
 async function loadTemplate(n) {
   const j = await api(`/api/templates/${encodeURIComponent(n)}`);
-  S.layout = j.layout; S.fixed = j.fixed || {};
-  if (j.mapping) S.mapping = { ...S.mapping, ...j.mapping };
+  S.layout = j.layout; S.fixed = lowerKeys(j.fixed);
+  if (j.mapping) S.mapping = { ...S.mapping, ...lowerKeys(j.mapping) };
   $("#tplName").value = n;
   S.sel = -1; S.pick = new Set();
   drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
@@ -1258,19 +1277,19 @@ $("#tplSave").addEventListener("click", async () => {
 function drawData() {
   const ph = fields();
   const rows = ph.map((p) => {
-    const fixedIn = h("input", { type: "text", placeholder: "text or {{Field}}", value: S.fixed[p] ?? "",
-      title: "Fixed text. May include other fields, such as {{Item}}" });
-    fixedIn.addEventListener("input", () => { S.fixed[p] = fixedIn.value; schedule(); });
+    const fixedIn = h("input", { type: "text", placeholder: "text or {{field}}", value: S.fixed[fkey(p)] ?? "",
+      title: "Fixed text. May include other fields, such as {{item}}" });
+    fixedIn.addEventListener("input", () => { S.fixed[fkey(p)] = fixedIn.value; schedule(); });
     // A newly referenced field gets its own row once typing is done
     fixedIn.addEventListener("change", () => { if (fields().join("\u0000") !== ph.join("\u0000")) { autoMap(); drawData(); } });
     let src = null;
     if (S.csv) {
       src = h("select", {}, h("option", { value: "" }, "— fixed text —"),
         ...S.csv.headers.map((c) => h("option", { value: c }, c)));
-      src.value = S.mapping[p] ?? "";
+      src.value = S.mapping[fkey(p)] ?? "";
       fixedIn.hidden = !!src.value;
       src.addEventListener("change", () => {
-        S.mapping[p] = src.value; fixedIn.hidden = !!src.value; schedule();
+        S.mapping[fkey(p)] = src.value; fixedIn.hidden = !!src.value; schedule();
         if (fields().join("\u0000") !== ph.join("\u0000")) drawData();
       });
     }
@@ -1284,7 +1303,7 @@ function drawData() {
     $("#csvInfo").textContent = `${S.csv.rows.length} rows · ${S.picked.size} selected · click a row to preview it`;
     drawRows();
   } else {
-    $("#csvInfo").innerHTML = "Type <code>{{Name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
+    $("#csvInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
   }
   drawPrintButton();
 }

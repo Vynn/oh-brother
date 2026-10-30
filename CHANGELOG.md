@@ -2,7 +2,9 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
-## 0.2.1 · unreleased
+## 0.2.1 · 2026-10-29
+
+Metric or imperial units.
 
 ### Added
 

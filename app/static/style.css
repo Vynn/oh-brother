@@ -44,6 +44,9 @@ code { font-family: var(--mono); font-size: 12px; background: #efede9; padding: 
   width: 14px; height: 14px; border-radius: 2px;
   background: linear-gradient(var(--ink) 0 50%, var(--red) 50% 100%);
 }
+.history { display: flex; gap: 2px; margin: 0 auto 0 20px; }
+.history svg { display: block; margin: auto; }
+.history button:disabled:hover { border-color: transparent; background: none; }
 .printer-chip {
   display: flex; align-items: center; gap: 8px;
   border: 1px solid var(--line); background: var(--surface);

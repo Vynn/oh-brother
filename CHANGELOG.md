@@ -2,6 +2,20 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.2.0 · unreleased
+
+### Added
+
+- Undo and redo for every change to the label: Ctrl+Z, and Ctrl+Shift+Z or Ctrl+Y, plus buttons in the top bar. The last 100 steps are kept. A drag or a burst of typing counts as one step.
+
+### Changed
+
+- Quick layouts adapt to the label's shape. On long, narrow labels, parts sit side by side, and the red header becomes a red block at the start.
+- Quick-layout margins scale with the label, from 2 mm on 62 mm tape down to 0.5 mm on 12 mm tape.
+- Quick-layout thumbnails are drawn at the current label's shape. Layouts that can't fit are greyed out, with the reason in a tooltip.
+- Quick layouts share field names: `{{Title}}`, `{{Body}}` and `{{Code}}`. Switching layouts keeps typed values.
+- Applying a quick layout no longer asks for confirmation; undo restores the previous layout.
+
 ## 0.1.2 · 2026-10-29
 
 Multiple selection and chained fields.

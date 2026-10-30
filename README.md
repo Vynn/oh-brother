@@ -20,18 +20,19 @@ On a fresh copy, run `sh build.sh` once (it needs internet). Then:
 sh run.sh
 ```
 
-Your browser opens the app. Click the printer chip (top right) and enter the printer's IP address. The port is 9100.
+Your browser opens the app. Click the printer chip (top right) and enter the printer's IP address. The printer's port is 9100, which is already filled in.
 
 | Option | Effect |
 |---|---|
 | `--no-browser` | Don't open a browser tab |
-| `--port N` | First port to try (default 8620) |
+| `--port N` | Port for the app in your browser (default 8620; the next free one is used if it's taken) |
 | `--lan` | Allow other devices on the network to use the app. There's no login, so only use this on a trusted network. |
 
 ## Use
 
 - **Label:** tape, length (continuous tape), and text direction (across or along the tape). The layout scales when these change.
-- **Quick layouts** replace the current elements with a starting layout.
+- **Quick layouts** replace the current elements with a starting layout, arranged for the label's shape: on long, narrow labels, parts sit side by side. The thumbnails show each layout as it would come out on the current label, and layouts that can't fit are greyed out. Values you've typed carry over, since the layouts share field names (`{{Title}}`, `{{Body}}`, `{{Code}}`).
+- **Undo:** Ctrl+Z, or the arrows in the top bar, undoes the last 100 changes. Redo with Ctrl+Shift+Z or Ctrl+Y. Inside a text box, these keys undo typing in that box.
 - **Editor:** the label is shown at its cut size. The dashed line is the printable area.
 - **Elements:** text, QR code, Code 128 barcode, and box or line, each in black or red.
   - Drag to move. Drag a corner or edge handle to resize.

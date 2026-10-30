@@ -61,6 +61,65 @@ const restore = () => {
   return false;
 };
 
+// ---------------------------------------------------------------------------
+// Undo history: snapshots of the layout and fixed values. Every edit calls
+// schedule(), which takes a snapshot once edits pause; drags and discrete
+// actions take one straight away. Typing inside a field keeps the browser's
+// own undo for that field.
+// ---------------------------------------------------------------------------
+
+const HISTORY_MAX = 100;
+let hist = [], histPos = -1, histTimer = 0, dragging = false;
+const snapshot = () => JSON.stringify({ layout: S.layout, fixed: S.fixed });
+
+function checkpoint() {
+  clearTimeout(histTimer);
+  const j = snapshot();
+  if (j === hist[histPos]) return;
+  hist = hist.slice(0, histPos + 1);
+  hist.push(j);
+  if (hist.length > HISTORY_MAX) hist.shift();
+  histPos = hist.length - 1;
+  drawUndo();
+}
+const checkpointSoon = () => { clearTimeout(histTimer); if (!dragging) histTimer = setTimeout(checkpoint, 500); };
+
+function stepHistory(d) {
+  checkpoint();   // keep any edit not yet recorded
+  const to = histPos + d;
+  if (to < 0 || to >= hist.length) return;
+  histPos = to;
+  const j = JSON.parse(hist[histPos]);
+  S.layout = j.layout; S.fixed = j.fixed;
+  const n = S.layout.elements.length;
+  S.pick = new Set([...S.pick].filter((i) => i < n));
+  S.sel = S.pick.size === 1 ? [...S.pick][0] : -1;
+  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
+  drawUndo();
+}
+const undo = () => stepHistory(-1), redo = () => stepHistory(1);
+
+function drawUndo() {
+  $("#undoBtn").disabled = histPos <= 0;
+  $("#redoBtn").disabled = histPos >= hist.length - 1;
+}
+$("#undoBtn").addEventListener("click", undo);
+$("#redoBtn").addEventListener("click", redo);
+
+// Ctrl+Z undo; Ctrl+Shift+Z and Ctrl+Y redo (Cmd on macOS)
+document.addEventListener("keydown", (ev) => {
+  if (!(ev.ctrlKey || ev.metaKey) || ev.altKey) return;
+  const k = ev.key.toLowerCase();
+  if (ev.target.matches("input, textarea, select") || $("#settings").open) {
+    // The field's own undo runs next; record any pending typing first so the
+    // app's history keeps it as a step of its own
+    if (k === "z" || k === "y") checkpoint();
+    return;
+  }
+  if (k === "z") { ev.shiftKey ? redo() : undo(); ev.preventDefault(); }
+  else if (k === "y") { redo(); ev.preventDefault(); }
+});
+
 const tape = () => S.meta.tapes.find((t) => t.id === S.layout.tape) || S.meta.tapes[0];
 const dpmm = () => S.meta.dpmm;
 
@@ -105,22 +164,93 @@ function newElement(type) {
 
 const T = (o) => ({ type: "text", color: "black", font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0, ...o });
 
-// Each preset maps canvas size (mm) to a list of elements; m = margin
+// Quick layouts. make(W, H) builds the elements for a printable area of W x H
+// mm, picking an arrangement from its shape: "thin" labels (long strips, such
+// as 12 mm tape run along) put parts side by side; "tall" ones stack them.
+// fits(W, H) returns "" or the reason the layout can't work at that size.
+// Field names are shared ({{Title}}, {{Body}}, {{Code}}) so values carry over
+// when switching layouts.
+
+// Margin scales with the short side: 2 mm on 62 mm tape, 0.5 mm on 12 mm
+const marginFor = (W, H) => Math.max(0.5, Math.min(2, Math.round(Math.min(W, H) * 0.14) / 2));
+const shapeOf = (W, H) => W / H >= 2.8 ? "thin" : H / W >= 1.4 ? "tall" : "normal";
+const QR = (o) => ({ type: "qr", color: "black", data: "{{Code}}", ec: "M", ...o });
+const BAR = (o) => ({ type: "barcode", color: "black", data: "{{Code}}", show_text: true, ...o });
+
 const PRESETS = [
-  { name: "Single line", make: (W, H, m = 2) => [T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Text}}", bold: true, align: "center", wrap: false })] },
-  { name: "Title + body", make: (W, H, m = 2) => [
-      T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.4, text: "{{Title}}", bold: true }),
-      T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{Body}}", valign: "top" })] },
-  { name: "Red header", make: (W, H, m = 2) => [
-      T({ x: 0, y: 0, w: W, h: H * 0.32, text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: 1, wrap: false }),
-      T({ x: m, y: H * 0.32 + m, w: W - 2 * m, h: H * 0.68 - 2 * m, text: "{{Body}}" })] },
-  { name: "Text + QR", make: (W, H, m = 2) => { const s = Math.min(H - 2 * m, W * 0.45); return [
-      T({ x: m, y: m, w: W - s - 3 * m, h: H - 2 * m, text: "{{Name}}", bold: true }),
-      { type: "qr", color: "black", x: W - s - m, y: (H - s) / 2, w: s, h: s, data: "{{Code}}", ec: "M" }]; } },
-  { name: "Barcode", make: (W, H, m = 2) => [
-      T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.35, text: "{{Name}}", bold: true, align: "center" }),
-      { type: "barcode", color: "black", x: m, y: m + (H - 2 * m) * 0.4, w: W - 2 * m, h: (H - 2 * m) * 0.6, data: "{{Code}}", show_text: true }] },
-  { name: "Address", make: (W, H, m = 3) => [
+  { name: "Single line",
+    fits: () => "",
+    make: (W, H, m = marginFor(W, H)) => [
+      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Title}}", bold: true, align: "center", wrap: false })] },
+
+  { name: "Title + body",
+    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
+    make: (W, H, m = marginFor(W, H)) => {
+      if (shapeOf(W, H) === "thin") {
+        const tw = (W - 3 * m) * 0.4;
+        return [
+          T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{Title}}", bold: true }),
+          T({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m, text: "{{Body}}" })];
+      }
+      return [
+        T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.4, text: "{{Title}}", bold: true }),
+        T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{Body}}", valign: "top" })];
+    } },
+
+  { name: "Red header",
+    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
+    make: (W, H, m = marginFor(W, H)) => {
+      const head = { text: "{{Title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
+      if (shapeOf(W, H) === "thin") {
+        // Red block at the start of the strip
+        const bw = W * 0.35;
+        return [T({ ...head, x: 0, y: 0, w: bw, h: H }), T({ x: bw + m, y: m, w: W - bw - 2 * m, h: H - 2 * m, text: "{{Body}}" })];
+      }
+      const bh = Math.min(H * 0.32, W * 0.3);
+      return [T({ ...head, x: 0, y: 0, w: W, h: bh }), T({ x: m, y: bh + m, w: W - 2 * m, h: H - bh - 2 * m, text: "{{Body}}" })];
+    } },
+
+  { name: "Text + QR",
+    fits: (W, H) => {
+      const m = marginFor(W, H);
+      const s = shapeOf(W, H) === "tall" ? Math.min(W - 2 * m, H * 0.6) : Math.min(H - 2 * m, W * 0.45);
+      return s < 7 ? "Too small for a scannable QR code" : "";
+    },
+    make: (W, H, m = marginFor(W, H)) => {
+      if (shapeOf(W, H) === "tall") {
+        // Text on top, QR code centred below
+        const s = Math.min(W - 2 * m, H * 0.6);
+        return [T({ x: m, y: m, w: W - 2 * m, h: H - s - 3 * m, text: "{{Title}}", bold: true, align: "center" }),
+          QR({ x: (W - s) / 2, y: H - s - m, w: s, h: s })];
+      }
+      const s = Math.min(H - 2 * m, W * 0.45);
+      return [T({ x: m, y: m, w: W - s - 3 * m, h: H - 2 * m, text: "{{Title}}", bold: true }),
+        QR({ x: W - s - m, y: (H - s) / 2, w: s, h: s })];
+    } },
+
+  { name: "Barcode",
+    fits: (W, H) => {
+      const m = marginFor(W, H), thin = shapeOf(W, H) === "thin";
+      const bw = thin ? (W - 3 * m) * 0.7 : W - 2 * m;
+      return bw < 20 ? "Needs a wider label for a barcode" : (thin ? H : H * 0.6) < 7 ? "Needs a taller label for a barcode" : "";
+    },
+    make: (W, H, m = marginFor(W, H)) => {
+      if (shapeOf(W, H) === "thin") {
+        const tw = (W - 3 * m) * 0.3;
+        return [T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{Title}}", bold: true }),
+          BAR({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m })];
+      }
+      // Title above the barcode; on tall labels both keep sensible heights
+      const ih = H - 2 * m;
+      const th = Math.min(ih * 0.3, 12), bh = Math.min(ih - th - m, (W - 2 * m) * 0.5);
+      const y0 = m + (ih - th - m - bh) / 2;
+      return [T({ x: m, y: y0, w: W - 2 * m, h: th, text: "{{Title}}", bold: true, align: "center" }),
+        BAR({ x: m, y: y0 + th + m, w: W - 2 * m, h: bh })];
+    } },
+
+  { name: "Address",
+    fits: (W, H) => H < 14 || W < 25 ? "Needs a larger label" : "",
+    make: (W, H, m = marginFor(W, H)) => [
       T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{Name}}\n{{Street}}\n{{City}} {{Postcode}}\n{{Country}}", valign: "top", wrap: false })] },
 ];
 
@@ -129,28 +259,29 @@ function roundAll(els) {
   return els.map((e) => ({ ...e, x: r2(e.x), y: r2(e.y), w: r2(e.w), h: r2(e.h) }));
 }
 
-// Thumbnail: draw the preset at a nominal 60x30 mm with text as grey bars
-function presetThumb(p) {
-  const W = 60, H = 30;
+// Thumbnail: the preset as built for the current label (W x H mm), with text
+// drawn as bars. Strokes and bar heights scale with the label.
+function presetThumb(p, W, H) {
+  const k = Math.max(W, H) / 60, kb = Math.min(W, H) / 30;
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
   const add = (tag, a) => { const n = document.createElementNS(svg.namespaceURI, tag); for (const k in a) n.setAttribute(k, a[k]); svg.append(n); };
-  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#fff", stroke: "#d6d3ce", "stroke-width": 0.6, rx: 1 });
+  add("rect", { x: 0, y: 0, width: W, height: H, fill: "#fff", stroke: "#d6d3ce", "stroke-width": 0.6 * k, rx: k });
   for (const e of p.make(W, H)) {
     const col = e.color === "red" ? "#d42b20" : "#2a2a2a";
     if (e.type === "text") {
       if (e.invert) add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: col });
       const lines = Math.max(1, (e.text.match(/\n/g) || []).length + 1);
-      const lh = Math.min(e.h / lines * 0.55, e.bold ? 6 : 4);
+      const lh = Math.min(e.h / lines * 0.55, (e.bold ? 6 : 4) * kb);
       for (let i = 0; i < lines; i++) {
         const bw = e.w * (i % 2 ? 0.6 : 0.8);
-        const bx = e.align === "center" ? e.x + (e.w - bw) / 2 : e.x + 1;
-        const by = e.valign === "top" ? e.y + 1 + i * lh * 1.6 : e.y + (e.h - lines * lh * 1.6) / 2 + i * lh * 1.6 + lh * 0.3;
-        add("rect", { x: bx, y: by, width: bw, height: lh, fill: e.invert ? "#fff" : col, rx: 0.5 });
+        const bx = e.align === "center" ? e.x + (e.w - bw) / 2 : e.x + Math.min(1, e.w * 0.05);
+        const by = e.valign === "top" ? e.y + Math.min(1, e.h * 0.05) + i * lh * 1.6 : e.y + (e.h - lines * lh * 1.6) / 2 + i * lh * 1.6 + lh * 0.3;
+        add("rect", { x: bx, y: by, width: bw, height: lh, fill: e.invert ? "#fff" : col, rx: 0.5 * kb });
       }
     } else if (e.type === "qr") {
-      add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: "none", stroke: col, "stroke-width": 1.4 });
+      add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: "none", stroke: col, "stroke-width": e.w * 0.1 });
       add("rect", { x: e.x + e.w * 0.3, y: e.y + e.h * 0.3, width: e.w * 0.4, height: e.h * 0.4, fill: col });
     } else if (e.type === "barcode") {
       for (let i = 0; i < 18; i++) add("rect", { x: e.x + (e.w / 18) * i, y: e.y, width: (e.w / 18) * (i % 3 ? 0.4 : 0.75), height: e.h * 0.8, fill: col });
@@ -218,6 +349,7 @@ let renderTimer = 0, renderBusy = false, renderAgain = false, previewURL = null;
 // delay: debounce for typing; 0 while dragging
 function schedule(delay = 90) {
   saveSoon();
+  checkpointSoon();
   drawOverlay();
   clearTimeout(renderTimer);
   renderTimer = setTimeout(() => { if (renderBusy) renderAgain = true; else doRender(); }, delay);
@@ -351,11 +483,14 @@ function track(el, ev, fn, done) {
   const onMove = (m) => { last = m; if (!frame) frame = requestAnimationFrame(apply); };
   const end = (m) => {
     if (frame) { cancelAnimationFrame(frame); apply(); }
+    dragging = false;
+    checkpoint();
     el.removeEventListener("pointermove", onMove);
     el.removeEventListener("pointerup", end);
     el.removeEventListener("pointercancel", end);
     done(m, last !== null);
   };
+  dragging = true;
   el.setPointerCapture(ev.pointerId);
   el.addEventListener("pointermove", onMove);
   el.addEventListener("pointerup", end);
@@ -367,6 +502,9 @@ const additive = (ev) => ev.shiftKey || ev.ctrlKey || ev.metaKey;
 
 $("#overlay").addEventListener("pointerdown", (ev) => {
   if (ev.button !== 0) return;
+  // Take focus out of any text field, so Ctrl+Z after a drag reaches the
+  // app's undo rather than the field's (preventDefault below keeps focus put)
+  if (document.activeElement?.matches("input, textarea, select")) document.activeElement.blur();
   const k = dpmm() * S.scale;
   const box = ev.target.closest(".box");
   if (!box) { marquee(ev, k); return; }
@@ -784,7 +922,7 @@ function reshape(change) {
       }
     }
   }
-  drawSetup(); drawList(); drawProps(); fit(); schedule();
+  drawSetup(); drawPresets(); drawList(); drawProps(); fit(); schedule();
 }
 
 $("#tape").addEventListener("change", (ev) => reshape(() => { S.layout.tape = ev.target.value; }));
@@ -796,14 +934,16 @@ $("#orientation").addEventListener("click", (ev) => {
 });
 
 function drawPresets() {
-  $("#presets").replaceChildren(...PRESETS.map((p) => h("button", { type: "button", class: "preset", onclick: () => {
-    if (S.layout.elements.length && !confirm("Replace the current elements with this layout?")) return;
-    const c = canvasMM();
-    let els = roundAll(p.make(c.w, c.h));
-    if (!tape().red) els = els.map((e) => ({ ...e, color: "black" }));
-    S.layout.elements = els;
-    select(-1); schedule();
-  } }, presetThumb(p), h("span", {}, p.name))));
+  const c = canvasMM();
+  $("#presets").replaceChildren(...PRESETS.map((p) => {
+    const why = p.fits(c.w, c.h);
+    return h("button", { type: "button", class: "preset", disabled: !!why, title: why || null, onclick: () => {
+      let els = roundAll(p.make(c.w, c.h));
+      if (!tape().red) els = els.map((e) => ({ ...e, color: "black" }));
+      S.layout.elements = els;
+      select(-1); schedule(); checkpoint();
+    } }, presetThumb(p, c.w, c.h), h("span", {}, p.name));
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -827,7 +967,7 @@ async function loadTemplate(n) {
   if (j.mapping) S.mapping = { ...S.mapping, ...j.mapping };
   $("#tplName").value = n;
   S.sel = -1; S.pick = new Set();
-  drawSetup(); drawList(); drawProps(); drawData(); fit(); schedule();
+  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
 }
 
 $("#tplSave").addEventListener("click", async () => {
@@ -1008,6 +1148,7 @@ $("#cfgTest").addEventListener("click", async () => {
   drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); drawPrinterChip();
   drawTemplates();
   fit(); schedule();
+  checkpoint();
   if (S.meta.config.printer_host) testPrinter();
   new ResizeObserver(fit).observe($("#stage"));
 })();

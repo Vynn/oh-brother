@@ -13,6 +13,11 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Live preview while dragging, snapping, alignment, and the label shown at its cut size (shipped in 0.1.1)
 - [x] Multiple selection with align and distribute, and fields that refer to other fields (shipped in 0.1.2)
 
+## 0.2 · Undo and adaptive layouts · in progress
+
+- [x] Undo and redo for every change, with the usual shortcuts
+- [x] Quick layouts that adapt to the label's shape and size
+
 ## Under consideration
 
 Not scheduled yet.

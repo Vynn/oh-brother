@@ -10,6 +10,14 @@
 
 <header class="topbar">
   <div class="brand"><span class="brand-mark"></span>Oh-Brother</div>
+  <div class="history">
+    <button class="icon" id="undoBtn" type="button" title="Undo (Ctrl+Z)" disabled>
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-3"/></svg>
+    </button>
+    <button class="icon" id="redoBtn" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>
+      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h3"/></svg>
+    </button>
+  </div>
   <button class="printer-chip" id="printerChip" type="button">
     <span class="dot" id="printerDot"></span><span id="printerLabel">No printer set</span>
   </button>

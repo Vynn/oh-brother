@@ -56,9 +56,12 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Colour, Duplicate and Delete apply to all of them.
 - **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
   - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
-  - Values from CSV cells are printed exactly as written, `{{…}}` included.
+  - Values from data cells are printed exactly as written, `{{…}}` included.
   - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
-- **CSV:** load a file, map fields to columns, click a row to preview it, and tick the rows to print.
+- **Data:** load a file, map fields to columns, click a row to preview it, and tick the rows to print. The first row holds the column names.
+  - **CSV and TSV**, with commas, semicolons, tabs or pipes.
+  - **OpenDocument spreadsheets** (`.ods`, `.fods`) and **Excel workbooks** (`.xlsx`): the first sheet is read. `.ods` cells come through as they're displayed. `.xlsx` dates appear as `YYYY-MM-DD`, but other number formats such as currency and percentages aren't applied, so format those cells as text if the exact look matters. Old `.xls` files aren't supported.
+  - **JSON**: a list of objects (keys become columns) or a list of lists.
 - **Templates** save the layout, fixed values and column mapping. A sample CSV in `data/samples/` matches the *Bin label* template.
 
 ![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{Size}}-5, printing as INS-M3-5](docs/images/multi-select.png)

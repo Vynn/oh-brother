@@ -1,18 +1,19 @@
 """Flask backend. Stateless apart from config and templates in the data folder."""
 
-import csv
 import io
 import json
 import os
 import re
 import threading
 import time
+import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 
 import printer
 import render
+import tables
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
@@ -184,24 +185,19 @@ def create_app(data_dir):
 
     @app.post("/api/csv")
     def parse_csv():
+        # Any supported table file, despite the name: see tables.py
         f = request.files.get("file")
         if not f:
             return jsonify(error="No file"), 400
-        raw = f.read()
-        for enc in ("utf-8-sig", "cp1252", "latin-1"):
-            try:
-                text = raw.decode(enc)
-                break
-            except UnicodeDecodeError:
-                continue
         try:
-            dialect = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|")
-        except csv.Error:
-            dialect = csv.excel
-        reader = csv.reader(io.StringIO(text), dialect)
-        rows = [r for r in reader if any(c.strip() for c in r)]
+            rows = tables.read_table(f.filename or "", f.read())
+        except ValueError as e:
+            return jsonify(error=str(e)), 400
+        except ET.ParseError:
+            return jsonify(error="The file looks damaged"), 400
+        rows = [r for r in rows if any(c.strip() for c in r)]
         if not rows:
-            return jsonify(error="CSV is empty"), 400
+            return jsonify(error="The file has no rows"), 400
         headers = [h.strip() or f"Column {i + 1}" for i, h in enumerate(rows[0])]
         records = [{h: (r[i] if i < len(r) else "") for i, h in enumerate(headers)} for r in rows[1:]]
         return jsonify(headers=headers, rows=records)

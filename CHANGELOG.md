@@ -4,6 +4,14 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 
 ## Unreleased
 
+### Added
+
+- Data can be loaded from OpenDocument spreadsheets (`.ods`, `.fods`), Excel workbooks (`.xlsx`) and JSON as well as CSV and TSV, with no extra packages. Spreadsheets give their first sheet. The button is now *Load data…*.
+
+### Fixed
+
+- Spreadsheets and other binary files picked as data were read as rows of garbage. They're now read properly if supported, or refused with a message naming the formats that work.
+
 ### Changed
 
 - Field names ignore case: `{{Code}}`, `{{code}}` and `{{CODE}}` are the same field, and so are built-ins such as `{{Date}}` and CSV columns named in fixed text. The Data table lists each field once, as first spelled. Templates and saved work from earlier versions are converted when loaded.

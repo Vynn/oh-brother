@@ -39,6 +39,10 @@ Each editor page holds `GET /api/alive` open: an event stream the server writes 
 
 On Linux, the launcher reads the default browser from `xdg-settings` and its command from the `.desktop` file, and passes `--new-window` for browsers known to accept it (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar). Anything else goes to `xdg-open`, which usually opens a tab.
 
+## Data files
+
+`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. Text is decoded as UTF-8, then Windows-1252, then Latin-1, and the delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is still `POST /api/csv`.
+
 `printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
 
 ## Editor geometry

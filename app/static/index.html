@@ -33,7 +33,7 @@
         <select id="tape"></select>
       </label>
       <div class="row2" id="lengthRow">
-        <label class="field">Length (mm)
+        <label class="field"><span>Length (<span id="lengthUnit">mm</span>)</span>
           <input type="number" id="length" min="5" max="1000" step="1">
         </label>
         <div class="field"><span>Printable</span><output id="printable" class="readout"></output></div>
@@ -42,6 +42,12 @@
         <div class="seg" id="orientation">
           <button type="button" data-v="portrait">Across tape</button>
           <button type="button" data-v="landscape">Along tape</button>
+        </div>
+      </div>
+      <div class="field">Units
+        <div class="seg" id="units">
+          <button type="button" data-v="mm">Millimetres</button>
+          <button type="button" data-v="in">Inches</button>
         </div>
       </div>
     </section>

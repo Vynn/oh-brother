@@ -18,6 +18,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Undo and redo for every change, with the usual shortcuts
 - [x] Quick layouts that adapt to the label's shape and size
 - [x] More quick layouts, in collapsible categories: storage, dates, cables and mailing, and retail price tags
+- [x] Metric or imperial units (in 0.2.1)
 
 ## Under consideration
 

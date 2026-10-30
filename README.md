@@ -31,6 +31,7 @@ Your browser opens the app. Click the printer chip (top right) and enter the pri
 ## Use
 
 - **Label:** tape, length (continuous tape), and text direction (across or along the tape). The layout scales when these change.
+- **Units:** millimetres or inches, for every length you see or type. Templates work in either. The app remembers your choice.
 - **Quick layouts** replace the current elements with a starting layout, arranged for the label's shape: on long, narrow labels, parts sit side by side. The thumbnails show each layout as it would come out on the current label, and layouts that can't fit are greyed out. Values you've typed carry over, since the layouts share field names (`{{Title}}`, `{{Body}}`, `{{Code}}`, `{{Price}}`).
   - **Basic:** single line, title and body, red header, two columns.
   - **Storage and inventory:** text and QR code, barcode, QR only, bin label.
@@ -41,7 +42,7 @@ Your browser opens the app. Click the printer chip (top right) and enter the pri
 - **Editor:** the label is shown at its cut size. The dashed line is the printable area.
 - **Elements:** text, QR code, Code 128 barcode, and box or line, each in black or red.
   - Drag to move. Drag a corner or edge handle to resize.
-  - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid. Hold Alt to place freely.
+  - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid (0.02 in when using inches). Hold Alt to place freely.
   - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
   - Arrow keys nudge the selection (Shift for bigger steps). Delete removes it.
   - Text size 0 shrinks the text to fit its box.

@@ -2,6 +2,13 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.2.1 · unreleased
+
+### Added
+
+- A Units switch in the Label section: millimetres (the default) or inches. Lengths, positions, sizes and readouts are shown and typed in the chosen unit, and tape names gain their width in inches. Templates and layouts are still stored in millimetres, so they work in either unit. Each browser remembers its choice.
+- In inches, the snap grid and arrow-key nudge are 0.02 in, or 0.1 in with Shift.
+
 ## 0.2.0 · 2026-10-29
 
 Undo, and more quick layouts that adapt to the label.

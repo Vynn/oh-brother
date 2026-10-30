@@ -145,7 +145,23 @@ function paperMM() {
 
 const r1 = (v) => Math.round(v * 10) / 10;
 const r2 = (v) => Math.round(v * 100) / 100;   // snapped positions (centres) need 0.01 mm
-const snap = (v) => Math.round(v * 2) / 2;   // 0.5 mm grid
+// Display units. Layouts are stored, rendered and printed in mm; inches are
+// only shown and typed. Each browser remembers its choice; mm by default.
+const UNITS = "oh-brother:units", INCH = 25.4;
+let units = "mm";
+try { if (localStorage.getItem(UNITS) === "in") units = "in"; } catch {}
+const imperial = () => units === "in";
+const toUnit = (mm) => imperial() ? Math.round(mm / INCH * 100) / 100 : r2(mm);   // input values
+const fromUnit = (v) => r2(imperial() ? v * INCH : v);
+const fmt = (mm) => imperial() ? `${(mm / INCH).toFixed(2)} in` : `${r1(mm)} mm`;
+const fmt2 = (w, hh) => imperial() ? `${(w / INCH).toFixed(2)} × ${(hh / INCH).toFixed(2)} in` : `${r1(w)} × ${r1(hh)} mm`;
+// Tape names come from the server in mm (Brother's sizes); inches are added
+const tapeName = (t) => imperial()
+  ? t.name.replace(/^([\d.]+)(?: × ([\d.]+))? mm/, (m, a, b) => `${m} (${(a / INCH).toFixed(2)}${b ? ` × ${(b / INCH).toFixed(2)}` : ""} in)`)
+  : t.name;
+
+// Snap grid: 0.5 mm, or 0.02 in (0.508 mm) in inches
+const snap = (v) => imperial() ? r2(Math.round(v / 0.508) * 0.508) : Math.round(v * 2) / 2;
 
 // ---------------------------------------------------------------------------
 // Element defaults & presets
@@ -428,7 +444,7 @@ const PRESETS = [
 
   // ---- Cables and mailing ----
   { name: "Cable flag", cat: "cables",
-    fits: (W, H) => Math.max(W, H) < 45 ? "Needs a label at least 45 mm long" : "",
+    fits: (W, H) => Math.max(W, H) < 45 ? `Needs a label at least ${fmt(45)} long` : "",
     make: (W, H, m = marginFor(W, H)) => {
       // The same text on both halves; the blank middle wraps around the
       // cable (15 mm suits cables up to about 4.5 mm across) and the halves
@@ -599,7 +615,7 @@ function fit() {
   wrap.classList.toggle("round", tape().round);
   Object.assign($("#printArea").style, { width: c.w * px + "px", height: c.h * px + "px" });
   $("#preview").style.imageRendering = S.scale >= 1 ? "pixelated" : "auto";
-  $("#dims").textContent = `Cut ${r1(p.w)} × ${r1(p.h)} mm · printable ${r1(c.w)} × ${r1(c.h)} mm`;
+  $("#dims").textContent = `Cut ${fmt2(p.w, p.h)} · printable ${fmt2(c.w, c.h)}`;
   drawOverlay();
 }
 
@@ -881,14 +897,15 @@ function distribute(vert) {
   schedule();
 }
 
-// Keyboard: nudge with arrows (Shift = 2 mm), Delete removes, Ctrl+A selects all
+// Keyboard: nudge with arrows (0.5 mm, Shift = 2 mm; in inches 0.02 in,
+// Shift = 0.1 in), Delete removes, Ctrl+A selects all
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, textarea, select") || $("#settings").open) return;
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
     setPick(new Set(S.layout.elements.map((_, i) => i))); ev.preventDefault(); return;
   }
   if (!S.pick.size) return;
-  const step = ev.shiftKey ? 2 : 0.5;
+  const step = imperial() ? (ev.shiftKey ? 2.54 : 0.508) : (ev.shiftKey ? 2 : 0.5);
   const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
   if (d) {
     for (const i of S.pick) { const e = S.layout.elements[i]; e.x = r2(e.x + d[0]); e.y = r2(e.y + d[1]); }
@@ -912,7 +929,7 @@ $("#overlay").addEventListener("dblclick", (ev) => {
 // ---------------------------------------------------------------------------
 
 const KIND = { text: "Text", qr: "QR", barcode: "Code", rect: "Box" };
-const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? `${e.w} × ${e.h} mm` : e.data;
+const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h) : e.data;
 
 // Selection: S.pick is the set of selected indexes; S.sel is the one shown in
 // the properties panel when exactly one is selected (otherwise -1)
@@ -982,7 +999,15 @@ function bind(key, input, conv = (v) => v) {
   input.addEventListener("input", () => { e[key] = conv(input.value); drawList(); drawOverlay(); schedule(); });
   return input;
 }
-const num = (key, attrs = {}) => bind(key, h("input", { type: "number", step: "0.5", ...attrs }), (v) => +v || 0);
+// Lengths: shown and typed in the display unit, stored in mm. min and step
+// are given in mm; in inches the step is 0.02 in (0.01 in for fine ones).
+const num = (key, { min, step = 0.5 } = {}) => {
+  const input = bind(key, h("input", { type: "number",
+    step: imperial() ? (step < 0.5 ? 0.01 : 0.02) : step,
+    min: min == null ? null : imperial() ? Math.max(min && 0.01, toUnit(min)) : min }), (v) => fromUnit(+v || 0));
+  input.value = toUnit(S.layout.elements[S.sel][key] ?? 0);
+  return input;
+};
 const fld = (label, ...kids) => h("label", { class: "field" }, label, ...kids);
 const seg = (key, opts) => {
   const e = S.layout.elements[S.sel];
@@ -1049,7 +1074,7 @@ function drawProps(light = false) {
   if (light) {
     for (const k of ["x", "y", "w", "h"]) {
       const inp = box.querySelector(`[data-key="${k}"]`);
-      if (inp && document.activeElement !== inp) inp.value = e[k];
+      if (inp && document.activeElement !== inp) inp.value = toUnit(e[k]);
     }
     return;
   }
@@ -1076,7 +1101,7 @@ function drawProps(light = false) {
     kids.push(h("div", { class: "field" }, "Align", seg("align", [["left", "Left"], ["center", "Centre"], ["right", "Right"]])));
     kids.push(h("div", { class: "field" }, "Vertical", seg("valign", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]])));
     kids.push(h("div", { class: "checks" }, chk("bold", "Bold"), chk("wrap", "Wrap"), chk("invert", "Inverted")));
-    kids.push(h("div", { class: "row2" }, fld("Padding (mm)", num("padding_mm", { min: 0 }))));
+    kids.push(h("div", { class: "row2" }, fld(`Padding (${units})`, num("padding_mm", { min: 0 }))));
   } else if (e.type === "qr") {
     const ec = h("select", {}, ...[["L", "L — 7%"], ["M", "M — 15%"], ["Q", "Q — 25%"], ["H", "H — 30%"]].map(([v, t]) => h("option", { value: v }, t)));
     kids.push(fld("Error correction", bind("ec", ec)));
@@ -1084,7 +1109,7 @@ function drawProps(light = false) {
     kids.push(h("div", { class: "checks" }, chk("show_text", "Show text")));
   } else if (e.type === "rect") {
     kids.push(h("div", { class: "checks" }, chk("fill", "Filled")));
-    kids.push(h("div", { class: "row2" }, fld("Outline (mm)", num("stroke_mm", { min: 0.1, step: 0.1 }))));
+    kids.push(h("div", { class: "row2" }, fld(`Outline (${units})`, num("stroke_mm", { min: 0.1, step: 0.1 }))));
   }
   box.replaceChildren(...kids);
 }
@@ -1099,13 +1124,20 @@ document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click
 // Label setup
 // ---------------------------------------------------------------------------
 
+function drawTapes() {
+  $("#tape").replaceChildren(...S.meta.tapes.map((t) => h("option", { value: t.id }, tapeName(t))));
+}
+
 function drawSetup() {
-  const t = tape();
+  const t = tape(), len = $("#length");
   $("#tape").value = t.id;
-  $("#length").value = S.layout.length_mm;
+  $("#lengthUnit").textContent = units;
+  Object.assign(len, imperial() ? { step: 0.1, min: 0.2, max: 39.37 } : { step: 1, min: 5, max: 1000 });
+  len.value = toUnit(S.layout.length_mm);
   $("#lengthRow").querySelector("label").hidden = !t.endless;
-  $("#printable").textContent = t.endless ? `${t.printable_mm[0]} mm wide` : `${t.printable_mm[0]} × ${t.printable_mm[1]} mm`;
+  $("#printable").textContent = t.endless ? `${fmt(t.printable_mm[0])} wide` : fmt2(...t.printable_mm);
   $("#orientation").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.layout.orientation));
+  $("#units").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === units));
 }
 
 // Apply a label-shape change, scaling elements proportionally so the layout
@@ -1130,7 +1162,15 @@ function reshape(change) {
 
 $("#tape").addEventListener("change", (ev) => reshape(() => { S.layout.tape = ev.target.value; }));
 // "change" (not "input") so typing 50 doesn't pass through a 5 mm label
-$("#length").addEventListener("change", (ev) => reshape(() => { S.layout.length_mm = Math.max(5, Math.min(1000, +ev.target.value || 5)); }));
+$("#length").addEventListener("change", (ev) => reshape(() => { S.layout.length_mm = Math.max(5, Math.min(1000, fromUnit(+ev.target.value) || 5)); }));
+// Units change only what's shown, so there's no undo step
+$("#units").addEventListener("click", (ev) => {
+  const v = ev.target.dataset.v;
+  if (!v || v === units) return;
+  units = v;
+  try { localStorage.setItem(UNITS, v); } catch {}
+  drawTapes(); drawSetup(); drawPresets(); drawList(); drawProps(); fit();
+});
 $("#orientation").addEventListener("click", (ev) => {
   const v = ev.target.dataset.v;
   if (v && v !== S.layout.orientation) reshape(() => { S.layout.orientation = v; });
@@ -1364,7 +1404,7 @@ $("#cfgTest").addEventListener("click", async () => {
 
 (async function boot() {
   S.meta = await api("/api/meta");
-  $("#tape").replaceChildren(...S.meta.tapes.map((t) => h("option", { value: t.id }, t.name)));
+  drawTapes();
   if (!restore() || !S.meta.tapes.some((t) => t.id === S.layout.tape)) {
     S.layout = { tape: S.meta.tapes[0].id, length_mm: 30, orientation: "portrait", elements: [] };
     const c = canvasMM();

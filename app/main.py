@@ -12,7 +12,7 @@ import sys
 import threading
 import webbrowser
 
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)

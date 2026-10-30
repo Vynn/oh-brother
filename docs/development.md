@@ -10,6 +10,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 | `data/templates/` | Saved templates | Yes |
 | `data/samples/` | Sample data | Yes |
 | `data/config.json` | Printer address, per machine | No |
+| `docs/images/` | Screenshots for the README | Yes |
 | `runtime/<platform>/` | Standalone Python | No, built |
 | `vendor/common/` | Pure-Python packages, shared by all platforms | No, built |
 | `vendor/<platform>/` | Compiled packages (Pillow) | No, built |
@@ -45,6 +46,16 @@ Element positions are in millimetres from the top left of the printable area, wh
 These cut sizes are derived from brother_ql's label data, not measured.
 
 Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid.
+
+## Fields
+
+The browser builds one record per label. A record holds the CSV row's columns, if a CSV is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.
+
+`render.fill()` replaces each `{{Name}}`. A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path.
+
+## Screenshots
+
+The README images are taken in the Claude desktop app's browser, from a separate instance with its own data folder and the placeholder printer address `192.168.1.50`. Real printer addresses and personal data must not appear in them.
 
 ## Commits
 

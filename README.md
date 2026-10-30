@@ -2,7 +2,9 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.1.1 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.1.2 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+
+![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
 ## Requirements
 
@@ -48,6 +50,8 @@ Your browser opens the app. Click the printer chip (top right) and enter the pri
   - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
 - **CSV:** load a file, map fields to columns, click a row to preview it, and tick the rows to print.
 - **Templates** save the layout, fixed values and column mapping. A sample CSV in `data/samples/` matches the *Bin label* template.
+
+![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{Size}}-5, printing as INS-M3-5](docs/images/multi-select.png)
 
 The preview is exactly what prints. Over the network the printer doesn't report back, so "Sent" means the job reached it.
 

@@ -143,7 +143,14 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
   position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px;
   background: #fff; border: 1.5px solid var(--accent); display: none;
 }
-.box.sel .handle { display: block; }
+.box.sel.solo .handle { display: block; }   /* resize one element at a time */
+/* The element whose text is being typed in the properties panel */
+.box.editing { outline: 2px solid var(--accent); background: rgba(47,111,223,.08); }
+.box.editing::before {
+  content: "Editing"; position: absolute; left: -2px; bottom: 100%; margin-bottom: 2px;
+  padding: 0 5px; font: 600 10px/16px var(--font); color: #fff; background: var(--accent); border-radius: 3px 3px 0 0;
+}
+.marquee { position: absolute; display: none; pointer-events: none; border: 1px solid var(--accent); background: rgba(47,111,223,.08); }
 .box.sel.small .handle.edge { display: none; }   /* too cramped for 8 handles */
 .handle.nw { left: 0;   top: 0;    cursor: nwse-resize; }
 .handle.n  { left: 50%; top: 0;    cursor: ns-resize; }

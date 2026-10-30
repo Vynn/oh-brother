@@ -107,20 +107,38 @@ def placeholders(layout):
     return seen
 
 
-def fill(template, record, keep_missing):
+def fill(template, record, keep_missing, chain=(), warnings=None):
+    """Replace {{Name}} with record values, then the built-in date/time.
+
+    Values of the fields named in `chain` (fixed text typed by the user) may
+    themselves contain {{Name}} and are filled in turn. Other values (CSV
+    cells) are used exactly as they are. A field that refers back to itself,
+    directly or through others, is left as its tag and reported.
+    """
     now = datetime.datetime.now()
     builtins = {"date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H:%M"),
                 "datetime": now.strftime("%Y-%m-%d %H:%M")}
 
-    def sub(m):
-        key = m.group(1)
-        if key in record and record[key] not in (None, ""):
-            return str(record[key])
-        if key in builtins:
-            return builtins[key]
-        return m.group(0) if keep_missing else ""
+    def expand(text, path):
+        def sub(m):
+            key = m.group(1)
+            if key in path:
+                if warnings is not None:
+                    msg = "Fields refer to each other in a loop: " + " → ".join(
+                        "{{%s}}" % k for k in path[path.index(key):] + (key,))
+                    if msg not in warnings:
+                        warnings.append(msg)
+                return m.group(0) if keep_missing else ""
+            if key in record and record[key] not in (None, ""):
+                v = str(record[key])
+                return expand(v, path + (key,)) if key in chain else v
+            if key in builtins:
+                return builtins[key]
+            return m.group(0) if keep_missing else ""
 
-    return PLACEHOLDER.sub(sub, str(template))
+        return PLACEHOLDER.sub(sub, text)
+
+    return expand(str(template), ())
 
 
 # --------------------------------------------------------------------------
@@ -269,7 +287,7 @@ def _draw_rect(mask, el):
         d.rectangle([0, 0, W - 1, H - 1], outline=255, width=max(1, mm(el.get("stroke_mm", 0.5))))
 
 
-def render(layout, record=None, keep_missing=True):
+def render(layout, record=None, keep_missing=True, chain=()):
     """Render a layout. Returns (RGB image, list of warning strings)."""
     record = record or {}
     warnings = []
@@ -294,7 +312,7 @@ def render(layout, record=None, keep_missing=True):
         # element to its box and lets later elements sit on top.
         mask = Image.new("L", (w, h), 0)
         if kind == "text":
-            text = fill(el.get("text", ""), record, keep_missing)
+            text = fill(el.get("text", ""), record, keep_missing, chain, warnings)
             if el.get("invert"):
                 img.paste(COLORS[color], (x, y, x + w, y + h))
                 _draw_text(mask, el, text, warnings)
@@ -302,9 +320,9 @@ def render(layout, record=None, keep_missing=True):
                 continue
             _draw_text(mask, el, text, warnings)
         elif kind == "qr":
-            _draw_qr(mask, el, fill(el.get("data", ""), record, False), warnings)
+            _draw_qr(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
         elif kind == "barcode":
-            _draw_barcode(mask, el, fill(el.get("data", ""), record, False), warnings)
+            _draw_barcode(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
         elif kind == "rect":
             _draw_rect(mask, el)
         else:

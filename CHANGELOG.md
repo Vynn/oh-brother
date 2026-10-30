@@ -2,6 +2,21 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.1.2 · unreleased
+
+### Added
+
+- Multiple selection: Shift- or Ctrl-click, drag across empty space, or Ctrl+A. The elements list follows the same clicks.
+- Moving, nudging, duplicating and deleting the whole selection. The selection's bounding box snaps like a single element.
+- Align several elements to each other or to the printable area, and distribute three or more with equal gaps.
+- Colour for every selected element at once.
+- The element whose text is being typed is outlined on the label and tagged *Editing*. Double-click an element on the label to jump to its text field.
+- Chained fields: a field's fixed text can include other fields (`{{SKU}}` = `P-{{Item}}`) and any CSV column. Loops are caught and reported. CSV cells are never expanded.
+
+### Changed
+
+- Deleting an element clears the selection instead of selecting the next one.
+
 ## 0.1.1 · 2026-10-29
 
 A smoother editor.

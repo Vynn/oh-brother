@@ -35,9 +35,17 @@ Your browser opens the app. Click the printer chip (top right) and enter the pri
   - Drag to move. Drag a corner or edge handle to resize.
   - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid. Hold Alt to place freely.
   - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
-  - Arrow keys nudge the selected element (Shift for bigger steps). Delete removes it.
+  - Arrow keys nudge the selection (Shift for bigger steps). Delete removes it.
   - Text size 0 shrinks the text to fit its box.
+  - While you type in a text field, its element is outlined on the label and tagged *Editing*. Double-click an element on the label to jump to its text.
+- **Several elements:** Shift- or Ctrl-click to add or remove one, drag across empty space to select every element the rectangle touches, or press Ctrl+A. Drag any of them to move them together.
+  - Align them to each other (Selection) or to the printable area (Label).
+  - Distribute three or more with equal gaps. The outermost two stay put.
+  - Colour, Duplicate and Delete apply to all of them.
 - **Fields:** `{{Name}}` in any text, QR code or barcode becomes a field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
+  - Fixed text can include other fields: set SKU to `{{Item}}` or `P-{{Item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
+  - Values from CSV cells are printed exactly as written, `{{…}}` included.
+  - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
 - **CSV:** load a file, map fields to columns, click a row to preview it, and tick the rows to print.
 - **Templates** save the layout, fixed values and column mapping. A sample CSV in `data/samples/` matches the *Bin label* template.
 

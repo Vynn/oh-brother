@@ -34,7 +34,10 @@ const api = async (path, opts = {}) => {
 const S = {
   meta: null,
   layout: { tape: "62red", length_mm: 30, orientation: "portrait", elements: [] },
-  sel: -1,
+  sel: -1,             // element in the properties panel (-1 = none, or several)
+  pick: new Set(),      // selected element indexes
+  editing: -1,          // element whose text field has focus
+  alignTo: "selection", // several selected: align to "selection" or "label"
   fixed: {},            // placeholder -> fixed text
   csv: null,            // {headers, rows}
   mapping: {},          // placeholder -> column name ("" = fixed text)
@@ -160,12 +163,35 @@ function presetThumb(p) {
 // Data records
 // ---------------------------------------------------------------------------
 
-// Build the placeholder->value record for one CSV row (or fixed values only)
+const TAG = /\{\{\s*([^{}]+?)\s*\}\}/g;
+const BUILTIN = ["date", "time", "datetime"];
+
+// A field takes fixed text unless a CSV is loaded and it's mapped to a column
+const isFixed = (p) => !(S.csv && S.mapping[p]);
+
+// The layout's fields, plus any field named inside a fixed value, so that
+// {{SKU}} = "{{Item}}" gives Item a row even when the layout doesn't use it.
+// CSV column names are left out: those come straight from the row.
+function fields() {
+  const out = [...S.placeholders];
+  for (let i = 0; i < out.length; i++) {
+    if (!isFixed(out[i])) continue;
+    for (const m of (S.fixed[out[i]] || "").matchAll(TAG)) {
+      if (!out.includes(m[1]) && !BUILTIN.includes(m[1]) && !S.csv?.headers.includes(m[1])) out.push(m[1]);
+    }
+  }
+  return out;
+}
+
+// Fields whose fixed values may themselves contain {{tags}} (sent as "chain")
+const chain = () => fields().filter(isFixed);
+
+// Build the field->value record for one CSV row (or fixed values only). The
+// row's own columns go in first, so a fixed value can refer to any column.
 function record(row) {
-  const rec = {};
-  for (const p of S.placeholders) {
-    const col = S.mapping[p];
-    rec[p] = row && col ? (row[col] ?? "") : (S.fixed[p] ?? "");
+  const rec = row ? { ...row } : {};
+  for (const p of fields()) {
+    rec[p] = isFixed(p) ? (S.fixed[p] ?? "") : (row?.[S.mapping[p]] ?? "");
   }
   return rec;
 }
@@ -174,7 +200,7 @@ const previewRecord = () => record(S.csv ? S.csv.rows[S.cur] : null);
 
 function autoMap() {
   if (!S.csv) return;
-  for (const p of S.placeholders) {
+  for (const p of fields()) {
     if (S.mapping[p] !== undefined && (S.mapping[p] === "" || S.csv.headers.includes(S.mapping[p]))) continue;
     const hit = S.csv.headers.find((c) => c.toLowerCase() === p.toLowerCase());
     S.mapping[p] = hit || "";
@@ -201,7 +227,7 @@ async function doRender() {
   renderBusy = true; renderAgain = false;
   try {
     const r = await fetch("/api/render", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ layout: S.layout, record: previewRecord() }) });
+      body: JSON.stringify({ layout: S.layout, record: previewRecord(), chain: chain() }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status} ${r.statusText}`);
     const meta = (k) => JSON.parse(decodeURIComponent(r.headers.get(k) || "%5B%5D"));
     const warnings = meta("X-Warnings"), placeholders = meta("X-Placeholders");
@@ -247,7 +273,8 @@ function drawWarnings(list) {
 }
 
 // ---------------------------------------------------------------------------
-// Overlay: selection boxes, drag to move, handles to resize, snapping
+// Overlay: selection boxes, drag to move, handles to resize, snapping,
+// drag on empty space to select several
 // ---------------------------------------------------------------------------
 
 const HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"];
@@ -268,17 +295,26 @@ function placeBox(box, e, i) {
   const k = dpmm() * S.scale, w = e.w * k, hh = e.h * k;
   // QR codes stay square, so corners only; small boxes too
   const small = e.type === "qr" || w < 36 || hh < 36;
-  box.className = "box" + (i === S.sel ? " sel" : "") + (small ? " small" : "");
+  box.className = "box" + (S.pick.has(i) ? " sel" : "") + (S.pick.size === 1 ? " solo" : "")
+    + (small ? " small" : "") + (i === S.editing ? " editing" : "");
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
 }
 
-// Snap lines in mm: the printable area's edges and centre, and every other
-// element's edges and centre
+// Bounding box (mm) of the given element indexes
+function bounds(idx) {
+  const els = idx.map((i) => S.layout.elements[i]);
+  const l = Math.min(...els.map((e) => e.x)), t = Math.min(...els.map((e) => e.y));
+  const r = Math.max(...els.map((e) => e.x + e.w)), b = Math.max(...els.map((e) => e.y + e.h));
+  return { l, t, r, b };
+}
+
+// Snap lines in mm: the printable area's edges and centre, and the edges and
+// centre of every element not being dragged
 function snapTargets(skip) {
   const c = canvasMM();
   const xs = [0, c.w / 2, c.w], ys = [0, c.h / 2, c.h];
   S.layout.elements.forEach((o, j) => {
-    if (j === skip || o.hidden) return;
+    if (skip.has(j) || o.hidden) return;
     xs.push(o.x, o.x + o.w / 2, o.x + o.w);
     ys.push(o.y, o.y + o.h / 2, o.y + o.h);
   });
@@ -308,42 +344,55 @@ function drawGuides(gx = [], gy = []) {
     ...gy.map((y) => line(-ext, px(y), c.w * k + ext, px(y))));
 }
 
+// Pointer drags: run fn(latest event) once per animation frame, then done()
+function track(el, ev, fn, done) {
+  let last = null, frame = 0;
+  const apply = () => { frame = 0; fn(last); };
+  const onMove = (m) => { last = m; if (!frame) frame = requestAnimationFrame(apply); };
+  const end = (m) => {
+    if (frame) { cancelAnimationFrame(frame); apply(); }
+    el.removeEventListener("pointermove", onMove);
+    el.removeEventListener("pointerup", end);
+    el.removeEventListener("pointercancel", end);
+    done(m, last !== null);
+  };
+  el.setPointerCapture(ev.pointerId);
+  el.addEventListener("pointermove", onMove);
+  el.addEventListener("pointerup", end);
+  el.addEventListener("pointercancel", end);
+  ev.preventDefault();
+}
+
+const additive = (ev) => ev.shiftKey || ev.ctrlKey || ev.metaKey;
+
 $("#overlay").addEventListener("pointerdown", (ev) => {
   if (ev.button !== 0) return;
-  const box = ev.target.closest(".box");
-  if (!box) { select(-1); return; }
-  const i = +box.dataset.i;
-  if (i !== S.sel) select(i);
-  const e = S.layout.elements[i];
-  const hd = ev.target.dataset.h || "";   // resize direction; "" = move
   const k = dpmm() * S.scale;
-  const start = { x: ev.clientX, y: ev.clientY, l: e.x, t: e.y, r: e.x + e.w, b: e.y + e.h };
-  const targets = snapTargets(i);
-  let last = null, frame = 0;
+  const box = ev.target.closest(".box");
+  if (!box) { marquee(ev, k); return; }
+  const i = +box.dataset.i;
+  if (additive(ev)) { select(i, true); ev.preventDefault(); return; }
+  const wasPicked = S.pick.has(i);
+  if (!wasPicked) select(i);
+  const hd = S.pick.size === 1 ? ev.target.dataset.h || "" : "";   // resize direction; "" = move
+  const start = { x: ev.clientX, y: ev.clientY };
+  const thrOf = (m) => m.altKey ? 0 : SNAP_PX / k;
 
-  // Applied once per animation frame with the latest pointer position
-  const apply = () => {
-    frame = 0;
-    const dx = (last.clientX - start.x) / k, dy = (last.clientY - start.y) / k;
-    const free = last.altKey, thr = SNAP_PX / k;
-    let gx = [], gy = [];
-    if (!hd) {
-      // Move: any of the left/centre/right (top/middle/bottom) lines may snap
-      let x = start.l + dx, y = start.t + dy;
-      const sx = !free && nearest([x, x + e.w / 2, x + e.w], targets.xs, thr);
-      const sy = !free && nearest([y, y + e.h / 2, y + e.h], targets.ys, thr);
-      if (sx) { x += sx.d; gx.push(sx.at); } else if (!free) x = snap(x);
-      if (sy) { y += sy.d; gy.push(sy.at); } else if (!free) y = snap(y);
-      e.x = r2(x); e.y = r2(y);
-    } else {
-      // Resize: only the dragged edges move, and each one snaps on its own
+  if (hd) {
+    // Resize one element: only the dragged edges move, each snapping on its own
+    const e = S.layout.elements[i];
+    const s0 = { l: e.x, t: e.y, r: e.x + e.w, b: e.y + e.h };
+    const targets = snapTargets(new Set([i]));
+    track(box, ev, (m) => {
+      const dx = (m.clientX - start.x) / k, dy = (m.clientY - start.y) / k, thr = thrOf(m);
+      let gx = [], gy = [];
       const edge = (v, list, guides) => {
-        if (free) return v;
+        if (!thr) return v;
         const s = nearest([v], list, thr);
         if (s) { guides.push(s.at); return s.at; }
         return snap(v);
       };
-      let { l, t, r, b } = start;
+      let { l, t, r, b } = s0;
       if (hd.includes("w")) l = Math.min(edge(l + dx, targets.xs, gx), r - 1);
       if (hd.includes("e")) r = Math.max(edge(r + dx, targets.xs, gx), l + 1);
       if (hd.includes("n")) t = Math.min(edge(t + dy, targets.ys, gy), b - 0.5);
@@ -357,77 +406,164 @@ $("#overlay").addEventListener("pointerdown", (ev) => {
         gy = gy.filter((v) => Math.abs(v - t) < 1e-6 || Math.abs(v - b) < 1e-6);
       }
       e.x = r2(l); e.y = r2(t); e.w = r2(r - l); e.h = r2(b - t);
-    }
-    placeBox(box, e, i);
+      placeBox(box, e, i);
+      drawGuides(gx, gy);
+      drawProps(true);
+      schedule(0);
+    }, () => { drawGuides(); save(); });
+    return;
+  }
+
+  // Move the whole selection. Its bounding box snaps like a single element:
+  // left/centre/right and top/middle/bottom lines.
+  const idx = picked();
+  const orig = idx.map((j) => ({ x: S.layout.elements[j].x, y: S.layout.elements[j].y }));
+  const b0 = bounds(idx), bw = b0.r - b0.l, bh = b0.b - b0.t;
+  const targets = snapTargets(new Set(idx));
+  track(box, ev, (m) => {
+    const thr = thrOf(m), gx = [], gy = [];
+    let x = b0.l + (m.clientX - start.x) / k, y = b0.t + (m.clientY - start.y) / k;
+    const sx = thr && nearest([x, x + bw / 2, x + bw], targets.xs, thr);
+    const sy = thr && nearest([y, y + bh / 2, y + bh], targets.ys, thr);
+    if (sx) { x += sx.d; gx.push(sx.at); } else if (thr) x = snap(x);
+    if (sy) { y += sy.d; gy.push(sy.at); } else if (thr) y = snap(y);
+    idx.forEach((j, n) => {
+      const e = S.layout.elements[j];
+      e.x = r2(orig[n].x + x - b0.l); e.y = r2(orig[n].y + y - b0.t);
+    });
     drawGuides(gx, gy);
     drawProps(true);
     schedule(0);
-  };
-  const onMove = (m) => { last = m; if (!frame) frame = requestAnimationFrame(apply); };
-  const end = () => {
-    if (frame) { cancelAnimationFrame(frame); apply(); }
-    box.removeEventListener("pointermove", onMove);
-    box.removeEventListener("pointerup", end);
-    box.removeEventListener("pointercancel", end);
-    drawGuides();
-    save();
-  };
-  box.setPointerCapture(ev.pointerId);
-  box.addEventListener("pointermove", onMove);
-  box.addEventListener("pointerup", end);
-  box.addEventListener("pointercancel", end);
-  ev.preventDefault();
+  }, (m, moved) => {
+    drawGuides(); save();
+    // A plain click on part of a group selects just that element
+    if (!moved && wasPicked && S.pick.size > 1) select(i);
+  });
 });
 
-// Align the selected element within the printable area
+// Drag on empty space: select every element the rectangle touches
+// (Shift/Ctrl adds to the selection). A plain click clears it.
+function marquee(ev, k) {
+  const ov = $("#overlay"), mq = $("#marquee");
+  const o = ov.getBoundingClientRect();
+  const x0 = ev.clientX - o.left, y0 = ev.clientY - o.top;
+  const base = additive(ev) ? new Set(S.pick) : new Set();
+  track(ov, ev, (m) => {
+    const x1 = m.clientX - o.left, y1 = m.clientY - o.top;
+    const l = Math.min(x0, x1), t = Math.min(y0, y1), r = Math.max(x0, x1), b = Math.max(y0, y1);
+    Object.assign(mq.style, { display: "block", left: l + "px", top: t + "px", width: r - l + "px", height: b - t + "px" });
+    const hit = new Set(base);
+    S.layout.elements.forEach((e, i) => {
+      if (e.x * k < r && (e.x + e.w) * k > l && e.y * k < b && (e.y + e.h) * k > t) hit.add(i);
+    });
+    setPick(hit);
+  }, (m, moved) => {
+    mq.style.display = "none";
+    if (!moved && !additive(ev)) select(-1);
+  });
+}
+
+// Align: one element to the printable area; several to their own bounding
+// box or to the printable area (S.alignTo)
 const ALIGN = [
-  ["left", "Align left", (e) => { e.x = 0; }],
-  ["hcenter", "Centre horizontally", (e, c) => { e.x = r2((c.w - e.w) / 2); }],
-  ["right", "Align right", (e, c) => { e.x = r2(c.w - e.w); }],
+  ["left", "Align left", (e, R) => { e.x = R.l; }],
+  ["hcenter", "Centre horizontally", (e, R) => { e.x = (R.l + R.r - e.w) / 2; }],
+  ["right", "Align right", (e, R) => { e.x = R.r - e.w; }],
   null,
-  ["top", "Align top", (e) => { e.y = 0; }],
-  ["vcenter", "Centre vertically", (e, c) => { e.y = r2((c.h - e.h) / 2); }],
-  ["bottom", "Align bottom", (e, c) => { e.y = r2(c.h - e.h); }],
+  ["top", "Align top", (e, R) => { e.y = R.t; }],
+  ["vcenter", "Centre vertically", (e, R) => { e.y = (R.t + R.b - e.h) / 2; }],
+  ["bottom", "Align bottom", (e, R) => { e.y = R.b - e.h; }],
 ];
+
+const svgIcon = (draw) => {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("width", 16); svg.setAttribute("height", 16);
+  draw((tag, a) => {
+    const n = document.createElementNS(ns, tag);
+    for (const [key, v] of Object.entries(a)) n.setAttribute(key, v);
+    svg.append(n);
+  });
+  return svg;
+};
+// Swap x/y attributes, to draw an icon once and get its vertical twin
+const T_ATTR = { x: "y", y: "x", width: "height", height: "width", x1: "y1", y1: "x1", x2: "y2", y2: "x2" };
+const transpose = (a) => Object.fromEntries(Object.entries(a).map(([k, v]) => [T_ATTR[k] || k, v]));
 
 // 16px icon: a guide line and two bars, drawn for "left" then transposed
 function alignIcon(kind) {
   const pos = { left: 0, top: 0, hcenter: 1, vcenter: 1, right: 2, bottom: 2 }[kind];
   const vert = ["top", "vcenter", "bottom"].includes(kind);
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
-  svg.setAttribute("width", 16); svg.setAttribute("height", 16);
-  const add = (tag, a) => {
-    const n = document.createElementNS(ns, tag);
-    for (const [key, v] of Object.entries(a)) n.setAttribute(vert ? { x: "y", y: "x", width: "height", height: "width", x1: "y1", y1: "x1", x2: "y2", y2: "x2" }[key] || key : key, v);
-    svg.append(n);
-  };
-  const at = [2.5, 8, 13.5][pos];
-  add("line", { x1: at, y1: 1.5, x2: at, y2: 14.5, stroke: "currentColor", "stroke-width": 1 });
-  for (const [len, y] of [[9, 4], [6, 9]]) {
-    add("rect", { x: [4, 8 - len / 2, 12 - len][pos], y, width: len, height: 3, fill: "currentColor", rx: 0.5 });
-  }
-  return svg;
+  return svgIcon((add) => {
+    const put = (tag, a) => add(tag, vert ? transpose(a) : a);
+    const at = [2.5, 8, 13.5][pos];
+    put("line", { x1: at, y1: 1.5, x2: at, y2: 14.5, stroke: "currentColor", "stroke-width": 1 });
+    for (const [len, y] of [[9, 4], [6, 9]]) {
+      put("rect", { x: [4, 8 - len / 2, 12 - len][pos], y, width: len, height: 3, fill: "currentColor", rx: 0.5 });
+    }
+  });
+}
+
+// 16px icon: three bars with equal gaps, between two end lines
+function distIcon(vert) {
+  return svgIcon((add) => {
+    const put = (tag, a) => add(tag, vert ? transpose(a) : a);
+    for (const x of [1.5, 14.5]) put("line", { x1: x, y1: 1.5, x2: x, y2: 14.5, stroke: "currentColor", "stroke-width": 1 });
+    for (const [x, hh] of [[3.5, 8], [7, 5], [10.5, 8]]) put("rect", { x, y: 8 - hh / 2, width: 2, height: hh, fill: "currentColor" });
+  });
 }
 
 function alignRow() {
   return h("div", { class: "align" }, ...ALIGN.map((a) => !a ? h("span", { class: "gap" }) :
     h("button", { type: "button", class: "icon", title: a[1], onclick: () => {
-      a[2](S.layout.elements[S.sel], canvasMM());
+      const idx = picked(), c = canvasMM();
+      const R = idx.length > 1 && S.alignTo === "selection" ? bounds(idx) : { l: 0, t: 0, r: c.w, b: c.h };
+      for (const i of idx) {
+        const e = S.layout.elements[i];
+        a[2](e, R);
+        e.x = r2(e.x); e.y = r2(e.y);
+      }
       drawProps(true); schedule();
     } }, alignIcon(a[0]))));
 }
 
-// Keyboard: nudge with arrows (Shift = 2 mm), Delete removes
+// Distribute: equal gaps between three or more elements; the two outermost stay put
+function distribute(vert) {
+  const [p, s] = vert ? ["y", "h"] : ["x", "w"];
+  const els = picked().map((i) => S.layout.elements[i]).sort((a, b) => a[p] - b[p]);
+  if (els.length < 3) return;
+  const first = els[0], end = Math.max(...els.map((e) => e[p] + e[s]));
+  const gap = (end - first[p] - els.reduce((n, e) => n + e[s], 0)) / (els.length - 1);
+  let at = first[p] + first[s] + gap;
+  for (const e of els.slice(1, -1)) { e[p] = r2(at); at += e[s] + gap; }
+  schedule();
+}
+
+// Keyboard: nudge with arrows (Shift = 2 mm), Delete removes, Ctrl+A selects all
 document.addEventListener("keydown", (ev) => {
-  if (S.sel < 0 || ev.target.matches("input, textarea, select") || $("#settings").open) return;
-  const e = S.layout.elements[S.sel];
+  if (ev.target.matches("input, textarea, select") || $("#settings").open) return;
+  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
+    setPick(new Set(S.layout.elements.map((_, i) => i))); ev.preventDefault(); return;
+  }
+  if (!S.pick.size) return;
   const step = ev.shiftKey ? 2 : 0.5;
   const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
-  if (d) { e.x = r2(e.x + d[0]); e.y = r2(e.y + d[1]); drawProps(true); schedule(); ev.preventDefault(); }
-  else if (ev.key === "Delete" || ev.key === "Backspace") { removeEl(S.sel); ev.preventDefault(); }
+  if (d) {
+    for (const i of S.pick) { const e = S.layout.elements[i]; e.x = r2(e.x + d[0]); e.y = r2(e.y + d[1]); }
+    drawProps(true); schedule(); ev.preventDefault();
+  }
+  else if (ev.key === "Delete" || ev.key === "Backspace") { removeEls(picked()); ev.preventDefault(); }
   else if (ev.key === "Escape") select(-1);
+});
+
+// Double-click a text, QR or barcode element: jump to its text field
+$("#overlay").addEventListener("dblclick", (ev) => {
+  const box = ev.target.closest(".box");
+  if (!box) return;
+  select(+box.dataset.i);
+  const f = $("#props").querySelector('[data-key="text"], [data-key="data"]');
+  if (f) { f.focus(); f.setSelectionRange?.(f.value.length, f.value.length); }
 });
 
 // ---------------------------------------------------------------------------
@@ -437,23 +573,34 @@ document.addEventListener("keydown", (ev) => {
 const KIND = { text: "Text", qr: "QR", barcode: "Code", rect: "Box" };
 const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? `${e.w} × ${e.h} mm` : e.data;
 
-function select(i) {
-  S.sel = i;
+// Selection: S.pick is the set of selected indexes; S.sel is the one shown in
+// the properties panel when exactly one is selected (otherwise -1)
+const picked = () => [...S.pick].sort((a, b) => a - b);
+
+function setPick(set) {
+  S.pick = set;
+  S.sel = set.size === 1 ? [...set][0] : -1;
   drawList(); drawOverlay(); drawProps();
 }
 
-function removeEl(i) {
-  S.layout.elements.splice(i, 1);
-  S.sel = Math.min(S.sel, S.layout.elements.length - 1);
-  drawList(); drawProps(); schedule();
+// add=true toggles i in the selection; otherwise i becomes the only one (-1 = none)
+function select(i, add = false) {
+  const set = add ? new Set(S.pick) : new Set();
+  if (i >= 0) add && set.has(i) ? set.delete(i) : set.add(i);
+  setPick(set);
+}
+
+function removeEls(idx) {
+  const gone = new Set(idx);
+  S.layout.elements = S.layout.elements.filter((_, i) => !gone.has(i));
+  setPick(new Set()); schedule();
 }
 
 function moveEl(i, d) {
   const els = S.layout.elements, j = i + d;
   if (j < 0 || j >= els.length) return;
   [els[i], els[j]] = [els[j], els[i]];
-  S.sel = j;
-  drawList(); schedule();
+  select(j); schedule();
 }
 
 function drawList() {
@@ -461,24 +608,29 @@ function drawList() {
   // Listed top-most first: later elements are drawn on top
   const items = els.map((e, i) => i).reverse().map((i) => {
     const e = els[i];
-    return h("li", { class: i === S.sel ? "sel" : "", onclick: () => select(i) },
+    return h("li", { class: S.pick.has(i) ? "sel" : "", onclick: (ev) => select(i, additive(ev)) },
       h("span", { class: "swatch" + (e.color === "red" ? " red" : "") }),
       h("span", { class: "kind" }, KIND[e.type]),
       h("span", { class: "txt", title: summary(e) }, summary(e)),
       h("span", { class: "acts" },
         h("button", { class: "icon", title: "Bring forward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, 1); } }, "↑"),
         h("button", { class: "icon", title: "Send backward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, -1); } }, "↓"),
-        h("button", { class: "icon", title: "Duplicate", onclick: (ev) => { ev.stopPropagation(); dupEl(i); } }, "⧉"),
-        h("button", { class: "icon", title: "Delete", onclick: (ev) => { ev.stopPropagation(); removeEl(i); } }, "×")));
+        h("button", { class: "icon", title: "Duplicate", onclick: (ev) => { ev.stopPropagation(); dupEls([i]); } }, "⧉"),
+        h("button", { class: "icon", title: "Delete", onclick: (ev) => { ev.stopPropagation(); removeEls([i]); } }, "×")));
   });
   $("#elList").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
 }
 
-function dupEl(i) {
-  const c = structuredClone(S.layout.elements[i]);
-  c.x = r1(c.x + 2); c.y = r1(c.y + 2);
-  S.layout.elements.splice(i + 1, 0, c);
-  select(i + 1); schedule();
+// Each copy goes just above its original, offset 2 mm; the copies end up selected
+function dupEls(idx) {
+  const els = S.layout.elements, copies = new Set();
+  idx.slice().sort((a, b) => b - a).forEach((i) => {
+    const c = structuredClone(els[i]);
+    c.x = r2(c.x + 2); c.y = r2(c.y + 2);
+    els.splice(i + 1, 0, c);
+  });
+  idx.slice().sort((a, b) => a - b).forEach((i, n) => copies.add(i + n + 1));
+  setPick(copies); schedule();
 }
 
 // Form helpers bound to the selected element
@@ -508,9 +660,49 @@ const chk = (key, label) => {
   return h("label", { class: "check" }, i, label);
 };
 
+// While a text field has focus, its element is marked on the label
+function editing(input) {
+  const i = S.sel;
+  input.addEventListener("focus", () => { S.editing = i; drawOverlay(); });
+  input.addEventListener("blur", () => { if (S.editing === i) S.editing = -1; drawOverlay(); });
+  return input;
+}
+
+const colourOpts = (redOK) => [
+  ["black", "Black"],
+  ["red", "Red", { cls: "red", disabled: !redOK, title: redOK ? "" : "Needs black/red tape (DK-2251)" }]];
+
+// Several elements selected: align, distribute, colour, duplicate, delete
+function drawMultiProps(box) {
+  const idx = picked(), els = idx.map((i) => S.layout.elements[i]);
+  const to = h("div", { class: "seg" });
+  const drawTo = () => to.replaceChildren(...[["selection", "Selection"], ["label", "Label"]].map(([v, t]) =>
+    h("button", { type: "button", class: S.alignTo === v ? "on" : "", onclick: () => { S.alignTo = v; drawTo(); } }, t)));
+  drawTo();
+  const colour = h("div", { class: "seg" });
+  const drawColour = () => colour.replaceChildren(...colourOpts(tape().red).map(([v, t, x = {}]) =>
+    h("button", { type: "button", class: (els.every((e) => e.color === v) ? "on " : "") + (x.cls || ""), disabled: x.disabled, title: x.title,
+      onclick: () => { els.forEach((e) => { e.color = v; }); drawColour(); drawList(); schedule(); } }, t)));
+  drawColour();
+  const n3 = idx.length >= 3 ? {} : { disabled: true, title: "Select three or more" };
+  box.replaceChildren(
+    h("h2", {}, `${idx.length} elements`),
+    h("div", { class: "field" }, "Align to", to),
+    h("div", { class: "field" }, "Align", alignRow()),
+    h("div", { class: "field" }, "Distribute", h("div", { class: "align" },
+      h("button", { type: "button", class: "icon", title: n3.title || "Distribute horizontally", disabled: n3.disabled, onclick: () => distribute(false) }, distIcon(false)),
+      h("button", { type: "button", class: "icon", title: n3.title || "Distribute vertically", disabled: n3.disabled, onclick: () => distribute(true) }, distIcon(true)))),
+    h("div", { class: "field" }, "Colour", colour),
+    h("div", { class: "row2" },
+      h("button", { type: "button", onclick: () => dupEls(idx) }, "Duplicate"),
+      h("button", { type: "button", onclick: () => removeEls(idx) }, "Delete")));
+}
+
 // light=true only refreshes geometry numbers (used while dragging)
 function drawProps(light = false) {
   const box = $("#props");
+  if (!light) S.editing = -1;   // a rebuilt panel has no focused field
+  if (S.pick.size > 1) { if (!light) drawMultiProps(box); return; }
   const e = S.layout.elements[S.sel];
   if (!e) { box.replaceChildren(); return; }
   if (light) {
@@ -524,17 +716,15 @@ function drawProps(light = false) {
   const kids = [h("h2", {}, KIND[e.type] === "Code" ? "Barcode" : KIND[e.type])];
 
   if (e.type === "text") {
-    kids.push(fld("Text", bind("text", h("textarea", { rows: 3, spellcheck: false }))));
+    kids.push(fld("Text", editing(bind("text", h("textarea", { rows: 3, spellcheck: false })))));
   } else if (e.type === "qr" || e.type === "barcode") {
-    kids.push(fld(e.type === "qr" ? "Data" : "Data (Code 128)", bind("data", h("input", { type: "text", spellcheck: false }))));
+    kids.push(fld(e.type === "qr" ? "Data" : "Data (Code 128)", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
   }
 
   kids.push(h("div", { class: "row4 num4" },
     fld("X", num("x")), fld("Y", num("y")), fld("W", num("w", { min: 0.5 })), fld("H", num("h", { min: 0.5 }))));
   kids.push(h("div", { class: "field" }, "Align to label", alignRow()));
-  kids.push(h("div", { class: "field" }, "Colour", seg("color", [
-    ["black", "Black"],
-    ["red", "Red", { cls: "red", disabled: !redOK, title: redOK ? "" : "Needs black/red tape (DK-2251)" }]])));
+  kids.push(h("div", { class: "field" }, "Colour", seg("color", colourOpts(redOK))));
 
   if (e.type === "text") {
     const font = h("select", {}, ...S.meta.fonts.map((f) => h("option", { value: f }, { sans: "Sans", narrow: "Narrow", serif: "Serif", mono: "Mono" }[f] || f)));
@@ -636,7 +826,7 @@ async function loadTemplate(n) {
   S.layout = j.layout; S.fixed = j.fixed || {};
   if (j.mapping) S.mapping = { ...S.mapping, ...j.mapping };
   $("#tplName").value = n;
-  S.sel = -1;
+  S.sel = -1; S.pick = new Set();
   drawSetup(); drawList(); drawProps(); drawData(); fit(); schedule();
 }
 
@@ -652,17 +842,23 @@ $("#tplSave").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 
 function drawData() {
-  const ph = S.placeholders;
+  const ph = fields();
   const rows = ph.map((p) => {
-    const fixedIn = h("input", { type: "text", placeholder: S.csv ? "fixed text" : "value", value: S.fixed[p] ?? "" });
+    const fixedIn = h("input", { type: "text", placeholder: "text or {{Field}}", value: S.fixed[p] ?? "",
+      title: "Fixed text. May include other fields, such as {{Item}}" });
     fixedIn.addEventListener("input", () => { S.fixed[p] = fixedIn.value; schedule(); });
+    // A newly referenced field gets its own row once typing is done
+    fixedIn.addEventListener("change", () => { if (fields().join("\u0000") !== ph.join("\u0000")) { autoMap(); drawData(); } });
     let src = null;
     if (S.csv) {
       src = h("select", {}, h("option", { value: "" }, "— fixed text —"),
         ...S.csv.headers.map((c) => h("option", { value: c }, c)));
       src.value = S.mapping[p] ?? "";
       fixedIn.hidden = !!src.value;
-      src.addEventListener("change", () => { S.mapping[p] = src.value; fixedIn.hidden = !!src.value; schedule(); });
+      src.addEventListener("change", () => {
+        S.mapping[p] = src.value; fixedIn.hidden = !!src.value; schedule();
+        if (fields().join("\u0000") !== ph.join("\u0000")) drawData();
+      });
     }
     return h("tr", {}, h("td", {}, `{{${p}}}`), src && h("td", {}, src), h("td", {}, fixedIn));
   });
@@ -745,7 +941,7 @@ $("#printBtn").addEventListener("click", async () => {
   status("Sending…");
   try {
     const j = await api("/api/print", { method: "POST", body: {
-      layout: S.layout, records: jobRecords(), copies: +$("#copies").value || 1, cut: $("#cut").checked } });
+      layout: S.layout, records: jobRecords(), chain: chain(), copies: +$("#copies").value || 1, cut: $("#cut").checked } });
     status(`Sent ${j.labels} label${j.labels === 1 ? "" : "s"}` + (j.warnings.length ? ` · ${j.warnings.length} warning(s)` : ""), "ok");
     if (j.warnings.length) drawWarnings(j.warnings);
   } catch (e) {

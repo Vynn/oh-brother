@@ -88,7 +88,7 @@ def create_app(data_dir):
         b = body()
         layout = b.get("layout", {})
         try:
-            img, warnings = render.render(layout, b.get("record"), keep_missing=True)
+            img, warnings = render.render(layout, b.get("record"), keep_missing=True, chain=set(b.get("chain") or ()))
         except Exception as e:
             return jsonify(error=str(e)), 400
         buf = io.BytesIO()
@@ -105,6 +105,7 @@ def create_app(data_dir):
         cfg = load_config()
         layout = b.get("layout", {})
         records = b.get("records") or [{}]
+        chain = set(b.get("chain") or ())   # fields whose fixed values may hold {{tags}}
         copies = max(1, min(100, int(b.get("copies", 1))))
         dry_run = bool(b.get("dry_run"))
         if not cfg["printer_host"] and not dry_run:
@@ -112,7 +113,7 @@ def create_app(data_dir):
 
         images, warnings = [], []
         for rec in records:
-            img, w = render.render(layout, rec, keep_missing=False)
+            img, w = render.render(layout, rec, keep_missing=False, chain=chain)
             warnings += [x for x in w if x not in warnings]
             images += [img] * copies
         try:

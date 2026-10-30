@@ -2,7 +2,7 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.2.1 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.2.2 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
 
 ![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
@@ -20,13 +20,16 @@ On a fresh copy, run `sh build.sh` once (it needs internet). Then:
 sh run.sh
 ```
 
-Your browser opens the app. Click the printer chip (top right) and enter the printer's IP address. The printer's port is 9100, which is already filled in.
+The app opens in a new window of your default browser (on macOS it may be a tab). Click the printer chip (top right) and enter the printer's IP address. The printer's port is 9100, which is already filled in.
+
+The app stops by itself about 10 seconds after you close its last window or tab, so a reload won't stop it. Ctrl+C in the terminal also stops it.
 
 | Option | Effect |
 |---|---|
-| `--no-browser` | Don't open a browser tab |
+| `--no-browser` | Don't open a browser; keep running until Ctrl+C |
 | `--port N` | Port for the app in your browser (default 8620; the next free one is used if it's taken) |
-| `--lan` | Allow other devices on the network to use the app. There's no login, so only use this on a trusted network. |
+| `--data DIR` | Use another data folder for templates and the printer address (default `data` next to `run.sh`) |
+| `--lan` | Allow other devices on the network to use the app. It keeps running until Ctrl+C. There's no login, so only use this on a trusted network. |
 
 ## Use
 

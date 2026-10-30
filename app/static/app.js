@@ -1412,6 +1412,9 @@ $("#cfgTest").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 
 (async function boot() {
+  // Held open while this page is: the launcher stops the app once the last
+  // page closes. EventSource reconnects by itself after a drop.
+  new EventSource("/api/alive");
   S.meta = await api("/api/meta");
   drawTapes();
   if (!restore() || !S.meta.tapes.some((t) => t.id === S.layout.tape)) {

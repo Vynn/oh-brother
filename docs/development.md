@@ -33,6 +33,12 @@ sh run.sh
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with warnings and field names in URL-encoded JSON headers. Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
+## Stopping with the window
+
+Each editor page holds `GET /api/alive` open: an event stream the server writes a keep-alive comment to every 3 seconds. Once a page closes, the next write fails and the stream ends. When the launcher opened the browser itself, and `--lan` is off, a watcher thread stops the server once no page has been open for 10 seconds. The page's `EventSource` reconnects by itself, so a reload stays inside that grace period. The timer uses `time.monotonic()`, which doesn't count time asleep, so a suspend shouldn't stop the app.
+
+On Linux, the launcher reads the default browser from `xdg-settings` and its command from the `.desktop` file, and passes `--new-window` for browsers known to accept it (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar). Anything else goes to `xdg-open`, which usually opens a tab.
+
 `printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
 
 ## Editor geometry

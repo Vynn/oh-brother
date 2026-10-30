@@ -19,11 +19,12 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Quick layouts that adapt to the label's shape and size
 - [x] More quick layouts, in collapsible categories: storage, dates, cables and mailing, and retail price tags
 - [x] Metric or imperial units (shipped in 0.2.1)
+- [x] Placeholders for empty QR codes and barcodes, and the app stops when its window closes (shipped in 0.2.2)
 
 ## Under consideration
 
 Not scheduled yet.
 
-- Click-to-launch: a Quit button, a single running instance, an optional idle shutdown, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
+- Click-to-launch: a Quit button, a single running instance, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
 - Windows: a `run.bat` launcher and a Windows runtime
 - Tested runtimes for ARM Linux and macOS

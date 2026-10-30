@@ -5,6 +5,8 @@ import io
 import json
 import os
 import re
+import threading
+import time
 from urllib.parse import quote
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
@@ -15,6 +17,33 @@ import render
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
+KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
+
+
+class Presence:
+    """Counts open editor pages, each holding a stream to /api/alive."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.count, self.seen, self.idle_since = 0, False, None
+
+    def join(self):
+        with self.lock:
+            self.count += 1
+            self.seen, self.idle_since = True, None
+
+    def leave(self):
+        with self.lock:
+            self.count -= 1
+            if self.count == 0:
+                self.idle_since = time.monotonic()   # monotonic: doesn't count time asleep
+
+    def idle_for(self):
+        """Seconds since the last page closed; 0 while one is open or none has opened yet."""
+        with self.lock:
+            if not self.seen or self.count or self.idle_since is None:
+                return 0
+            return time.monotonic() - self.idle_since
 
 
 def create_app(data_dir):
@@ -23,6 +52,7 @@ def create_app(data_dir):
     tpl_dir = os.path.join(data_dir, "templates")
     cfg_path = os.path.join(data_dir, "config.json")
     os.makedirs(tpl_dir, exist_ok=True)
+    app.presence = Presence()
 
     def load_config():
         cfg = dict(DEFAULT_CONFIG)
@@ -51,6 +81,22 @@ def create_app(data_dir):
     @app.get("/static/<path:p>")
     def static_files(p):
         return send_from_directory(STATIC, p)
+
+    # ---- presence: lets the launcher stop once the last page closes --------
+
+    @app.get("/api/alive")
+    def alive():
+        def stream():
+            app.presence.join()
+            try:
+                yield "retry: 2000\n\n"   # reconnect quickly after a drop
+                while True:
+                    time.sleep(KEEPALIVE_S)
+                    yield ": keep-alive\n\n"   # fails once the page is gone, ending the stream
+            finally:
+                app.presence.leave()
+
+        return Response(stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store"})
 
     # ---- config ------------------------------------------------------------
 

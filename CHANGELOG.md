@@ -2,12 +2,19 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
-## Unreleased
+## 0.2.2 · 2026-10-30
+
+Code placeholders, and the app closes with its window.
 
 ### Added
 
 - Empty QR codes and barcodes show a placeholder in the editor: blue hatching with a caption such as "QR · no data", or "Barcode · invalid data" when a barcode can't encode its data. It is drawn only in the editor, never into the label, so it can't print or be mistaken for a code.
 - Printing warns when a QR code or barcode was blank on any label, with the number of labels affected.
+- The app stops by itself about 10 seconds after its last window or tab closes, so a reload doesn't stop it. This applies when `run.sh` opened the browser; with `--no-browser` or `--lan` it runs until Ctrl+C.
+
+### Changed
+
+- On Linux, the app opens in a new window of the default browser instead of a tab, for Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar browsers.
 
 ## 0.2.1 · 2026-10-29
 

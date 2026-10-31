@@ -2,7 +2,9 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
-## Unreleased
+## 0.3.0 · 2026-10-30
+
+Data from spreadsheets, and fields that tidy up after themselves.
 
 ### Added
 

@@ -2,7 +2,7 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.2.2 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.3.0 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
 
 ![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
@@ -54,8 +54,8 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Align them to each other (Selection) or to the printable area (Label).
   - Distribute three or more with equal gaps. The outermost two stay put.
   - Colour, Duplicate and Delete apply to all of them.
-- **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
-  - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
+- **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a column from a data file. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
+  - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any data column, even one the label doesn't use. A field named only here gets its own row.
   - Values from data cells are printed exactly as written, `{{…}}` included.
   - Empty fields print as nothing, in the preview too. In text, the spaces beside an empty field go with it, and a line left blank by empty fields is removed, so the lines below move up. If every field in a text element is empty, the whole element is hidden, fixed text included: `SKU {{code}}` with no code prints nothing. The editor marks it with a hatched placeholder. Punctuation you type between fields stays, so `{{city}}, {{postcode}}` with no postcode prints `Paris,`.
   - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
@@ -65,7 +65,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - **JSON**: a list of objects (keys become columns) or a list of lists.
 - **Templates** save the layout, fixed values and column mapping. A sample CSV in `data/samples/` matches the *Bin label* template.
 
-![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{Size}}-5, printing as INS-M3-5](docs/images/multi-select.png)
+![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{size}}-5, printing as INS-M3-5](docs/images/multi-select.png)
 
 The preview is exactly what prints. Over the network the printer doesn't report back, so "Sent" means the job reached it.
 

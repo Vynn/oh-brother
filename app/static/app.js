@@ -614,7 +614,8 @@ async function doRender() {
     drawOverlay();
     const changed = placeholders.join("\u0000") !== S.placeholders.join("\u0000");
     S.placeholders = placeholders;
-    if (changed) { autoMap(); drawData(); }
+    // New fields weren't in the record just sent, so draw once more with their values
+    if (changed) { autoMap(); drawData(); renderAgain = true; }
     drawWarnings(warnings);
   } catch (e) {
     drawWarnings([e.message]);
@@ -670,11 +671,13 @@ function placeBox(box, e, i) {
   const small = e.type === "qr" || w < 36 || hh < 36;
   box.className = "box" + (S.pick.has(i) ? " sel" : "") + (S.pick.size === 1 ? " solo" : "")
     + (small ? " small" : "") + (i === S.editing ? " editing" : "");
-  // Blank QR/barcode: an editor-only placeholder (never part of the printed image)
+  // Blank QR/barcode, or text whose fields are all empty: an editor-only
+  // placeholder (never part of the printed image)
   const why = S.blank.get(i);
-  if (why && (e.type === "qr" || e.type === "barcode")) {
+  if (why && ["qr", "barcode", "text"].includes(e.type)) {
     box.classList.add("blank");
-    box.dataset.blank = `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
+    box.dataset.blank = e.type === "text" ? "Text · empty fields"
+      : `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
   } else delete box.dataset.blank;
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
 }

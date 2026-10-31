@@ -116,8 +116,9 @@ def fill(template, record, keep_missing, chain=(), warnings=None):
 
     Values of the fields named in `chain` (fixed text typed by the user) may
     themselves contain {{Name}} and are filled in turn. Other values (CSV
-    cells) are used exactly as they are. A field that refers back to itself,
-    directly or through others, is left as its tag and reported.
+    cells) are used exactly as they are. Empty fields fill as nothing. A
+    field that refers back to itself, directly or through others, is reported
+    and, with keep_missing (the preview), left as its tag.
     Names are case-insensitive: {{Code}}, {{code}} and {{CODE}} are one field.
     """
     # Later keys win, so the record's fields override same-named CSV columns
@@ -142,11 +143,46 @@ def fill(template, record, keep_missing, chain=(), warnings=None):
                 return expand(v, path + (key,)) if key in chain else v
             if key in builtins:
                 return builtins[key]
-            return m.group(0) if keep_missing else ""
+            return ""
 
         return PLACEHOLDER.sub(sub, text)
 
     return expand(str(template), ())
+
+
+EMPTY = "\x00"   # marks where an empty field was, while tidying a line
+_AROUND_EMPTY = re.compile(r"( *)\x00( *)")
+
+
+def fill_text(template, record, keep_missing, chain=(), warnings=None):
+    """Fill a text element. Returns (text, hide).
+
+    Tidies up after empty fields: spaces beside one are dropped (a single
+    space stays between words on both sides), and a line that had fields
+    but is left blank is removed. Lines typed blank stay. `hide` is true when
+    the text has fields and all of them are empty, so fixed text around them
+    (a "SKU" label, an inverted bar) isn't drawn on its own.
+    """
+    has_field = filled = False
+    lines = []
+    for line in str(template).split("\n"):
+        if not PLACEHOLDER.search(line):
+            lines.append(line)
+            continue
+        has_field = True
+
+        def one(m):
+            nonlocal filled
+            v = fill(m.group(0), record, keep_missing, chain, warnings)
+            filled = filled or v != ""
+            return v if v != "" else EMPTY
+
+        out = _AROUND_EMPTY.sub(lambda m: " " if m.group(1) and m.group(2) else "", PLACEHOLDER.sub(one, line))
+        if out.strip():
+            lines.append(out)
+    if has_field and not filled:
+        return "", True
+    return "\n".join(lines), False
 
 
 # --------------------------------------------------------------------------
@@ -300,8 +336,9 @@ def _draw_rect(mask, el):
 def render(layout, record=None, keep_missing=True, chain=()):
     """Render a layout. Returns (RGB image, warning strings, blank codes).
 
-    Blank codes are QR codes and barcodes that drew nothing, as
-    {"i": element index, "type": "qr"|"barcode", "why": "empty"|"invalid"}.
+    Blank elements drew nothing: QR codes and barcodes with empty or invalid
+    data, and text whose fields are all empty, as
+    {"i": element index, "type": "qr"|"barcode"|"text", "why": "empty"|"invalid"}.
     The editor marks them; they are never drawn into the image.
     """
     record = record or {}
@@ -327,7 +364,10 @@ def render(layout, record=None, keep_missing=True, chain=()):
         # element to its box and lets later elements sit on top.
         mask = Image.new("L", (w, h), 0)
         if kind == "text":
-            text = fill(el.get("text", ""), record, keep_missing, chain, warnings)
+            text, hide = fill_text(el.get("text", ""), record, keep_missing, chain, warnings)
+            if hide:
+                blank.append({"i": i, "type": "text", "why": "empty"})
+                continue
             if el.get("invert"):
                 img.paste(COLORS[color], (x, y, x + w, y + h))
                 _draw_text(mask, el, text, warnings)

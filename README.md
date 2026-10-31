@@ -57,6 +57,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
 - **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a CSV column. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
   - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any CSV column, even one the label doesn't use. A field named only here gets its own row.
   - Values from data cells are printed exactly as written, `{{…}}` included.
+  - Empty fields print as nothing, in the preview too. In text, the spaces beside an empty field go with it, and a line left blank by empty fields is removed, so the lines below move up. If every field in a text element is empty, the whole element is hidden, fixed text included: `SKU {{code}}` with no code prints nothing. The editor marks it with a hatched placeholder. Punctuation you type between fields stays, so `{{city}}, {{postcode}}` with no postcode prints `Paris,`.
   - Fields that refer to each other in a loop are left blank on the label, and a warning names them.
 - **Data:** load a file, map fields to columns, click a row to preview it, and tick the rows to print. The first row holds the column names.
   - **CSV and TSV**, with commas, semicolons, tabs or pipes.

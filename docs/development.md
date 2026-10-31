@@ -61,7 +61,9 @@ Snapping works in millimetres. Targets are the printable area's edges and centre
 
 The browser builds one record per label. A record holds the CSV row's columns, if a CSV is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.
 
-`render.fill()` replaces each `{{name}}` (names are case-insensitive). A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path.
+`render.fill()` replaces each `{{name}}` (names are case-insensitive). A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path. Other empty fields fill as nothing in both.
+
+Text elements go through `render.fill_text()`, which fills each line field by field and tidies up after empty ones. Spaces beside an empty field are dropped, leaving one space only when there was space on both sides. A line that had fields and is left blank is removed. When a text element has fields and all are empty, it isn't drawn, and it's listed in `X-Blank` like an empty code so the editor can mark it. Print doesn't warn about these, since hiding them is intended.
 
 ## Screenshots
 

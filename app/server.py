@@ -165,6 +165,8 @@ def create_app(data_dir):
             warnings += [x for x in w if x not in warnings]
             images += [img] * copies
             for b in blank:   # count labels printed with a blank code
+                if b["type"] == "text":
+                    continue   # text with empty fields is hidden on purpose
                 key = (b["type"], b["why"])
                 blanks[key] = blanks.get(key, 0) + copies
         for (kind, why), n in blanks.items():

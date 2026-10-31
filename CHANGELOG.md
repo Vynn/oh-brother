@@ -7,9 +7,11 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 ### Added
 
 - Data can be loaded from OpenDocument spreadsheets (`.ods`, `.fods`), Excel workbooks (`.xlsx`) and JSON as well as CSV and TSV, with no extra packages. Spreadsheets give their first sheet. The button is now *Load data…*.
+- Empty fields are hidden. They print as nothing and now show as nothing in the preview too, instead of their `{{tag}}`. In text, spaces beside an empty field go with it, a line left blank by empty fields is removed, and an element whose fields are all empty isn't drawn at all, fixed text and inverted bars included. The editor marks such text with a hatched placeholder.
 
 ### Fixed
 
+- When a layout change brought in new fields, the first preview was drawn without their values. It now redraws once the fields are known.
 - Spreadsheets and other binary files picked as data were read as rows of garbage. They're now read properly if supported, or refused with a message naming the formats that work.
 
 ### Changed

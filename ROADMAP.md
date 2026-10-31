@@ -27,6 +27,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Field names that ignore case
 - [x] Empty fields hidden in the preview and in print, with the lines and spaces around them tidied
 - [x] Sample templates kept apart from your own, requests from other sites refused, and a test suite (shipped in 0.3.1)
+- [x] Saving asks before replacing a template, separators tidied beside empty fields, and UTF-16 data (shipped in 0.3.2)
 
 ## Under consideration
 

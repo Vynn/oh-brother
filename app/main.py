@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 
-VERSION = "0.3.1"
+VERSION = "0.3.2"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
@@ -24,15 +24,36 @@ GRACE_S = 10   # stop this long after the last page closes (covers reloads)
 NEW_WINDOW = ("firefox", "librewolf", "chrome", "chromium", "brave", "edge", "vivaldi", "opera")
 
 
-def free_port(start):
+def free_port(start, host):
+    """The first port from `start` that is free on `host`, the address the server will use."""
     for port in range(start, start + 50):
         with socket.socket() as s:
+            # As the server does: otherwise connections from the last run, closing
+            # for about a minute, make the port look taken, and the app moves to
+            # the next one, where the editor's saved layout and units aren't found.
+            # Not on Windows, where this would also let it share a port in use.
+            if os.name != "nt":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
-                s.bind(("127.0.0.1", port))
+                s.bind((host, port))
                 return port
             except OSError:
                 continue
     raise SystemExit("No free port found")
+
+
+def lan_address():
+    """This machine's address on the local network, or None when it has none.
+
+    Connecting a UDP socket sends nothing: it only picks the interface that
+    would reach the address given, here one reserved for documentation.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        try:
+            s.connect(("192.0.2.1", 9))
+            return s.getsockname()[0]
+        except OSError:
+            return None
 
 
 def default_browser_cmd():
@@ -50,11 +71,14 @@ def default_browser_cmd():
         try:
             with open(os.path.join(d, "applications", desk), encoding="utf-8") as f:
                 line = next((l for l in f if l.startswith("Exec=")), None)
-        except OSError:
+        except (OSError, UnicodeDecodeError):
             continue
         if line:
             # Drop field codes (%u) and Flatpak's @@ markers; the URL is added later
-            cmd = [t for t in shlex.split(line[5:]) if not t.startswith(("%", "@@"))]
+            try:
+                cmd = [t for t in shlex.split(line[5:]) if not t.startswith(("%", "@@"))]
+            except ValueError:   # unbalanced quotes: leave it to xdg-open
+                return None
             return cmd or None
     return None
 
@@ -109,14 +133,19 @@ def main():
 
     from werkzeug.serving import make_server
 
-    port = free_port(args.port)
-    url = f"http://127.0.0.1:{port}/"
+    host = "0.0.0.0" if args.lan else "127.0.0.1"
+    port = free_port(args.port, host)
+    url = f"http://127.0.0.1:{port}/"   # this machine's own window uses the local address
     app = create_app(os.path.abspath(args.data), lan=args.lan)
-    server = make_server("0.0.0.0" if args.lan else "127.0.0.1", port, app, threaded=True)
+    server = make_server(host, port, app, threaded=True)
     # Stop with the window only when we opened it, and not when other machines may use it
     auto_stop = not args.no_browser and not args.lan
     print(f"Oh-Brother {VERSION} running at {url}  "
           + ("(closes with its window, or Ctrl+C)" if auto_stop else "(Ctrl+C to stop)"))
+    if args.lan:
+        ip = lan_address()
+        print(f"Other devices: http://{ip}:{port}/" if ip
+              else f"Other devices: this machine's network address, port {port}")
     if not args.no_browser:
         threading.Timer(0.8, open_browser, [url]).start()
     if auto_stop:

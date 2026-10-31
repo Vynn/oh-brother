@@ -58,6 +58,28 @@ class FillText(unittest.TestCase):
         self.assertEqual(self.fill("{{first}} {{last}}", first="Ada"), ("Ada", False))
         self.assertEqual(self.fill("{{first}} {{last}}", last="Lovelace"), ("Lovelace", False))
 
+    def test_separator_beside_an_empty_field_goes(self):
+        address = "{{name}} · {{street}} · {{city}} {{postcode}}"
+        self.assertEqual(self.fill(address, name="Ada", city="Paris")[0], "Ada · Paris")
+        self.assertEqual(self.fill(address, street="1 Rue X", city="Paris")[0], "1 Rue X · Paris")
+        self.assertEqual(self.fill(address, name="Ada", street="1 Rue X")[0], "Ada · 1 Rue X")
+        self.assertEqual(self.fill("{{city}}, {{postcode}}", city="Paris")[0], "Paris")
+        self.assertEqual(self.fill("{{city}}, {{postcode}}", postcode="75001")[0], "75001")
+
+    def test_one_separator_left_between_fields(self):
+        self.assertEqual(self.fill("{{a}} · {{b}} · {{c}} · {{d}}", a="A", d="D")[0], "A · D")
+        self.assertEqual(self.fill("{{a}}/{{b}}/{{c}}", a="A", c="C")[0], "A/C")
+        self.assertEqual(self.fill("{{a}} – {{b}} | {{c}}", a="A", c="C")[0], "A – C")
+        # The field after the gap keeps the separator before it
+        self.assertEqual(self.fill("{{first}} {{last}} · {{city}}", first="Ada", city="Paris")[0], "Ada · Paris")
+        self.assertEqual(self.fill("{{a}} · {{b}} {{c}}", a="A", c="C")[0], "A · C")
+
+    def test_separator_starting_a_line_stays(self):
+        self.assertEqual(self.fill("- {{qty}} {{item}}", item="Bolt")[0], "- Bolt")
+
+    def test_other_punctuation_stays(self):
+        self.assertEqual(self.fill("{{a}}: {{b}}", a="A")[0], "A:")
+
     def test_line_left_blank_is_removed(self):
         self.assertEqual(self.fill("{{a}}\n{{b}}\n{{c}}", a="A", c="C"), ("A\nC", False))
 

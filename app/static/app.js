@@ -23,7 +23,7 @@ const api = async (path, opts = {}) => {
     body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body,
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || `${r.status} ${r.statusText}`);
+  if (!r.ok) throw Object.assign(new Error(j.error || `${r.status} ${r.statusText}`), { status: r.status });
   return j;
 };
 
@@ -1252,7 +1252,10 @@ async function drawTemplates() {
     h("button", { class: "name", onclick: () => loadTemplate(n) }, n),
     h("button", { class: "icon", title: "Delete template", onclick: async () => {
       if (!confirm(`Delete template “${n}”?`)) return;
-      await api(`/api/templates/${encodeURIComponent(n)}`, { method: "DELETE" });
+      try {
+        await api(`/api/templates/${encodeURIComponent(n)}`, { method: "DELETE" });
+        status("", "", "#tplStatus");
+      } catch (e) { status(e.message, "err", "#tplStatus"); }
       drawTemplates();
     } }, "×")));
   // Samples ship with the app, after your own. They open like templates but
@@ -1265,7 +1268,11 @@ async function drawTemplates() {
 }
 
 async function loadTemplate(n, sample = false) {
-  const j = await api(`/api/${sample ? "samples" : "templates"}/${encodeURIComponent(n)}`);
+  let j;
+  try {
+    j = await api(`/api/${sample ? "samples" : "templates"}/${encodeURIComponent(n)}`);
+  } catch (e) { status(e.message, "err", "#tplStatus"); return; }
+  status("", "", "#tplStatus");
   S.layout = j.layout; S.fixed = lowerKeys(j.fixed);
   if (j.mapping) S.mapping = { ...S.mapping, ...lowerKeys(j.mapping) };
   $("#tplName").value = sample ? "" : n;   // so Save asks for a name, and can't overwrite one of yours
@@ -1273,12 +1280,27 @@ async function loadTemplate(n, sample = false) {
   drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
 }
 
+// Saving over a template asks first. The server refuses (409) unless the
+// request says to replace, so a template saved in another window counts too.
+// Names the server can't use as file names come back with the reason.
 $("#tplSave").addEventListener("click", async () => {
   const n = $("#tplName").value.trim();
   if (!n) { $("#tplName").focus(); return; }
-  await api(`/api/templates/${encodeURIComponent(n)}`, { method: "PUT", body: { layout: S.layout, fixed: S.fixed, mapping: S.mapping } });
-  drawTemplates();
+  const put = (replace) => api(`/api/templates/${encodeURIComponent(n)}${replace ? "?replace=1" : ""}`,
+    { method: "PUT", body: { layout: S.layout, fixed: S.fixed, mapping: S.mapping } });
+  try {
+    try {
+      await put(false);
+    } catch (e) {
+      if (e.status !== 409) throw e;
+      if (!confirm(`Replace your template “${n}”?`)) return;
+      await put(true);
+    }
+    status(`Saved “${n}”`, "ok", "#tplStatus");
+    drawTemplates();
+  } catch (e) { status(e.message, "err", "#tplStatus"); }
 });
+$("#tplName").addEventListener("input", () => status("", "", "#tplStatus"));
 
 // ---------------------------------------------------------------------------
 // Data: fields table, CSV rows
@@ -1372,9 +1394,12 @@ function drawPrintButton() {
 }
 $("#copies").addEventListener("input", drawPrintButton);
 
-function status(msg, cls = "") {
-  const s = $("#printStatus");
-  s.textContent = msg; s.className = "status " + cls;
+// A status line: the print bar's, or another such as the templates' (#tplStatus)
+function status(msg, cls = "", where = "#printStatus") {
+  const s = $(where);
+  s.textContent = msg;
+  s.classList.remove("ok", "err");
+  if (cls) s.classList.add(cls);
 }
 
 $("#printBtn").addEventListener("click", async () => {

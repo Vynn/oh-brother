@@ -151,14 +151,37 @@ def fill(template, record, keep_missing, chain=(), warnings=None):
 
 
 EMPTY = "\x00"   # marks where an empty field was, while tidying a line
-_AROUND_EMPTY = re.compile(r"( *)\x00( *)")
+# Punctuation typed between fields. Beside an empty field, one is dropped so
+# none is left doubled or dangling. Brackets and colons aren't separators.
+SEPARATORS = "·,;/|-–—"
+_SEP = "([%s])?" % re.escape(SEPARATORS)
+_AROUND_EMPTY = re.compile(r"( *)%s( *)\x00( *)%s( *)" % (_SEP, _SEP))
+
+
+def _tidy_empty(m):
+    """Replacement for one empty field, the spaces beside it, and a separator.
+
+    "A · _ · B" keeps one separator, "A · _" and "_ · B" lose theirs, and
+    "A _ · B" keeps it for B. A separator with nothing before it starts the
+    line ("- _ Bolt") and stays.
+    """
+    ls, lsep, lsp, rsp, rsep, rs = (g or "" for g in m.groups())
+    before, after = m.start() > 0, m.end() < len(m.string)
+    if lsep and rsep:
+        return ls + lsep + rs
+    if lsep:
+        return "" if before and not after else ls + lsep + lsp
+    if rsep:
+        return rsp + rsep + rs if before else ""
+    return " " if ls and rsp else ""   # a single space stays between words
 
 
 def fill_text(template, record, keep_missing, chain=(), warnings=None):
     """Fill a text element. Returns (text, hide).
 
     Tidies up after empty fields: spaces beside one are dropped (a single
-    space stays between words on both sides), and a line that had fields
+    space stays between words on both sides), so is a separator it would
+    leave doubled or dangling (see _tidy_empty), and a line that had fields
     but is left blank is removed. Lines typed blank stay. `hide` is true when
     the text has fields and all of them are empty, so fixed text around them
     (a "SKU" label, an inverted bar) isn't drawn on its own.
@@ -177,7 +200,11 @@ def fill_text(template, record, keep_missing, chain=(), warnings=None):
             filled = filled or v != ""
             return v if v != "" else EMPTY
 
-        out = _AROUND_EMPTY.sub(lambda m: " " if m.group(1) and m.group(2) else "", PLACEHOLDER.sub(one, line))
+        out = PLACEHOLDER.sub(one, line)
+        # One empty field at a time, left to right, so each sees the line as
+        # the one before left it: "A · _ · _ · B" becomes "A · B"
+        while EMPTY in out:
+            out = _AROUND_EMPTY.sub(_tidy_empty, out, count=1)
         if out.strip():
             lines.append(out)
     if has_field and not filled:

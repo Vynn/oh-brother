@@ -89,6 +89,13 @@ def _member(z, path):
 
 
 def _decode(raw):
+    # UTF-16 only with a byte-order mark, as Excel's "Unicode Text" writes it.
+    # Without one it can't be told from other bytes reliably.
+    if raw[:2] in (b"\xff\xfe", b"\xfe\xff"):
+        try:
+            return raw.decode("utf-16")   # reads and drops the mark
+        except UnicodeDecodeError:
+            pass
     for enc in ("utf-8-sig", "cp1252"):
         try:
             return raw.decode(enc)

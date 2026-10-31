@@ -2,6 +2,26 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.3.2 · 2026-10-31
+
+Safer template saving, tidier separators, UTF-16 data, and launcher fixes.
+
+### Fixed
+
+- Saving a template replaced one of the same name without asking. Since 0.3.1 your templates aren't in the repository, so the old one was gone for good. Saving now asks first.
+- Template names were changed without telling you. Anything but letters, digits, spaces, `-` and `_` was dropped, so saving as "Bin label!" replaced "Bin label". Names are now kept as typed. A name that can't be a file name on Windows, macOS or Linux is refused, with the reason.
+- A save request the app refused, because its content wasn't a template, emptied the template it named.
+- A failed save showed no message. Saving, opening and deleting templates now report on a line under the name box.
+- Data saved by Excel as *Unicode Text* (UTF-16) was refused as not text.
+- If the default browser's `.desktop` file couldn't be parsed, no window opened, and the app kept running, since no window ever connected. It now falls back to `xdg-open`.
+- Restarting the app within about a minute moved it to the next port, because the last run's connections were still closing. On the new port the editor's saved layout, units and open categories weren't found, since the browser keeps them per address.
+- With `--lan`, the free-port check tested only `127.0.0.1`. A port in use on another network address stopped startup with an error.
+
+### Changed
+
+- A separator between fields (`·` `,` `;` `/` `|` or a dash) goes with an empty field beside it. `Ada · · Paris` now prints `Ada · Paris`, and `{{city}}, {{postcode}}` with no postcode prints `Paris` rather than `Paris,`. A dash starting a line stays, and so do brackets and colons.
+- With `--lan`, the app also prints the address other devices use.
+
 ## 0.3.1 · 2026-10-30
 
 Fixes, requests from other sites refused, and samples kept apart from your templates.

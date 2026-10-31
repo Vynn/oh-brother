@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from unittest import mock
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 import printer
 import render
@@ -176,12 +176,55 @@ class Templates(ApiTest):
         client = server.create_app(self.data, samples_dir=os.path.join(self.data, "nowhere")).test_client()
         self.assertEqual(client.get("/api/templates").get_json(), {"templates": [], "samples": []})
 
-    def test_names_stay_inside_the_templates_folder(self):
-        self.client.put("/api/templates/..evil..", json={})
-        self.assertEqual(os.listdir(os.path.join(self.data, "templates")), ["evil.json"])
+    def saved(self):
+        return sorted(os.listdir(os.path.join(self.data, "templates")))
 
-    def test_name_with_nothing_usable_is_refused(self):
-        self.assertEqual(self.client.put("/api/templates/!!", json={}).status_code, 400)
+    def put(self, name, tpl=None):
+        # Encoded the way the editor sends it, so ? # % reach the server
+        return self.client.put("/api/templates/" + quote(name, safe=""), json=tpl or {})
+
+    def test_saving_over_a_template_needs_replace(self):
+        self.client.put("/api/templates/Mine", json={"v": 1})
+        resp = self.client.put("/api/templates/Mine", json={"v": 2})
+        self.assertEqual(resp.status_code, 409)
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 1})
+        self.assertEqual(self.client.put("/api/templates/Mine?replace=1", json={"v": 2}).get_json(), {"ok": True})
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 2})
+
+    def test_a_refused_body_leaves_the_template_alone(self):
+        self.client.put("/api/templates/Mine", json={"v": 1})
+        self.assertEqual(self.client.put("/api/templates/Mine?replace=1", json=[1]).status_code, 400)
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 1})
+
+    def test_names_are_used_as_typed(self):
+        for name in ("Bin label!", "Étiquette #2 (red)", "50% off", "x" * server.MAX_NAME):
+            with self.subTest(name):
+                self.assertEqual(self.put(name).status_code, 200)
+                self.assertEqual(self.client.get("/api/templates/" + quote(name, safe="")).status_code, 200)
+        self.assertEqual(self.saved(), sorted(["50% off.json", "Bin label!.json", "Étiquette #2 (red).json",
+                                               "x" * server.MAX_NAME + ".json"]))
+
+    def test_names_that_cant_be_file_names_are_refused(self):
+        cases = {
+            " ": "Give the template a name",
+            "a/b": server.BAD_NAME_MSG,
+            "../evil": server.BAD_NAME_MSG,
+            ".hidden": "Template names can't start or end with a dot",
+            "ends.": "Template names can't start or end with a dot",
+            "CON": "“CON” is a name Windows keeps for devices. Choose another.",
+            "x" * (server.MAX_NAME + 1): f"Template names can be up to {server.MAX_NAME} characters",
+        }
+        for c in '\\:*?"<>|\t':
+            cases[f"a{c}b"] = cases["a/b"]
+        for name, msg in cases.items():
+            with self.subTest(name):
+                resp = self.put(name)
+                self.assertEqual((resp.status_code, resp.get_json()), (400, {"error": msg}))
+        for name in ("lpt1", "nul.v2", "Com9 .x"):
+            with self.subTest(name):
+                self.assertEqual(self.put(name).status_code, 400)
+        self.assertEqual(self.saved(), [])
+
 
 
 class OtherSites(ApiTest):
@@ -226,7 +269,8 @@ class Errors(ApiTest):
         self.assertJsonError(self.client.get("/api/nothing"), 404)
         self.assertJsonError(self.client.get("/api/templates/Missing"), 404, "No template by that name")
         self.assertJsonError(self.client.delete("/api/templates/Missing"), 404, "No template by that name")
-        self.assertJsonError(self.client.put("/api/templates/!!", json={}), 400, "Invalid template name")
+        self.assertJsonError(self.client.put("/api/templates/.x", json={}), 400,
+                             "Template names can't start or end with a dot")
         for raw in ("[1]", "{bad", ""):
             with self.subTest(raw=raw):
                 resp = self.client.post("/api/config", data=raw, content_type="application/json")

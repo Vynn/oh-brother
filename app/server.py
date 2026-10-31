@@ -24,6 +24,16 @@ DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}   # names this machine is reached by without --lan
 
+# Template names become file names, so they follow the rules of Windows, macOS
+# and Linux together. Names that break them are refused, not changed.
+BAD_NAME_CHARS = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
+# The list is joined with no-break spaces so it never wraps partway
+BAD_NAME_MSG = "Template names can't contain " + "\u00a0".join('/\\:*?"<>|')
+# Device names Windows keeps for itself, with any extension: "con" and "con.v2"
+# would be saved as con.json and con.v2.json, which Windows can't open
+RESERVED_NAMES = {"con", "prn", "aux", "nul", *(f"{d}{i}" for d in ("com", "lpt") for i in range(1, 10))}
+MAX_NAME = 60   # characters; at up to 4 bytes each, under the usual 255-byte limit with ".json"
+
 
 class Presence:
     """Counts open editor pages, each holding a stream to /api/alive."""
@@ -97,10 +107,18 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         return cfg
 
     def tpl_path(name, folder=tpl_dir):
-        safe = re.sub(r"[^\w\- ]+", "", name).strip()
-        if not safe:
-            abort(400, "Invalid template name")
-        return os.path.join(folder, safe + ".json")
+        name = name.strip()
+        if not name:
+            abort(400, "Give the template a name")
+        if BAD_NAME_CHARS.search(name):
+            abort(400, BAD_NAME_MSG)
+        if name.startswith(".") or name.endswith("."):
+            abort(400, "Template names can't start or end with a dot")
+        if name.split(".")[0].rstrip().lower() in RESERVED_NAMES:
+            abort(400, f"“{name}” is a name Windows keeps for devices. Choose another.")
+        if len(name) > MAX_NAME:
+            abort(400, f"Template names can be up to {MAX_NAME} characters")
+        return os.path.join(folder, name + ".json")
 
     def tpl_names(folder):
         try:
@@ -289,23 +307,29 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     def list_templates():
         return jsonify(templates=tpl_names(tpl_dir), samples=tpl_names(sample_dir))
 
-    @app.get("/api/templates/<name>")
+    @app.get("/api/templates/<path:name>")
     def get_template(name):
         return read_tpl(tpl_path(name))
 
     # Samples can be opened but not saved over or deleted: saving writes a
     # template of the user's own
-    @app.get("/api/samples/<name>")
+    @app.get("/api/samples/<path:name>")
     def get_sample(name):
         return read_tpl(tpl_path(name, sample_dir))
 
-    @app.put("/api/templates/<name>")
+    # Names are matched as paths so one with a slash reaches tpl_path and is
+    # refused with its reason, not a bare "not found"
+    @app.put("/api/templates/<path:name>")
     def put_template(name):
-        with open(tpl_path(name), "w", encoding="utf-8") as f:
-            json.dump(body(), f, indent=2)
+        path, data = tpl_path(name), body()   # checked before the file is opened, which empties it
+        # Saving over a template takes ?replace=1, sent once the editor has asked
+        if os.path.exists(path) and request.args.get("replace") != "1":
+            abort(409, "A template by that name exists")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
         return jsonify(ok=True)
 
-    @app.delete("/api/templates/<name>")
+    @app.delete("/api/templates/<path:name>")
     def delete_template(name):
         try:
             os.remove(tpl_path(name))

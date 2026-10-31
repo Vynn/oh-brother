@@ -123,6 +123,13 @@ class Delimited(unittest.TestCase):
         raw = "code,name\nA1,café\n".encode("utf-8-sig")
         self.assertEqual(tables.read_table("data.csv", raw), [["code", "name"], ["A1", "café"]])
 
+    def test_utf16_with_byte_order_mark(self):
+        # Excel's "Unicode Text": UTF-16, tab-separated
+        text = "code\tname\r\nA1\tcafé\r\n"
+        for raw in (b"\xff\xfe" + text.encode("utf-16-le"), b"\xfe\xff" + text.encode("utf-16-be")):
+            with self.subTest(mark=raw[:2]):
+                self.assertEqual(tables.read_table("data.txt", raw), [["code", "name"], ["A1", "café"]])
+
     def test_windows_1252_fallback(self):
         raw = "name,price\ncafé,€3\n".encode("cp1252")
         self.assertEqual(tables.read_table("data.csv", raw)[1], ["café", "€3"])

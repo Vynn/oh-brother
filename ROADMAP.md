@@ -26,6 +26,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Data from OpenDocument and Excel spreadsheets and JSON, as well as CSV and TSV
 - [x] Field names that ignore case
 - [x] Empty fields hidden in the preview and in print, with the lines and spaces around them tidied
+- [x] Sample templates kept apart from your own, requests from other sites refused, and a test suite (shipped in 0.3.1)
 
 ## Under consideration
 

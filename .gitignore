@@ -2,8 +2,8 @@
 /runtime/
 /vendor/
 
-# Per-machine settings (printer address)
-/data/config.json
+# Your templates and printer address
+/data/
 
 # Anything containing real personal data
 private/

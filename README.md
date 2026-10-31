@@ -2,7 +2,7 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.3.0 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.3.1 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
 
 ![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
@@ -63,7 +63,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - **CSV and TSV**, with commas, semicolons, tabs or pipes.
   - **OpenDocument spreadsheets** (`.ods`, `.fods`) and **Excel workbooks** (`.xlsx`): the first sheet is read. `.ods` cells come through as they're displayed. `.xlsx` dates appear as `YYYY-MM-DD`, but other number formats such as currency and percentages aren't applied, so format those cells as text if the exact look matters. Old `.xls` files aren't supported.
   - **JSON**: a list of objects (keys become columns) or a list of lists.
-- **Templates** save the layout, fixed values and column mapping. A sample CSV in `data/samples/` matches the *Bin label* template.
+- **Templates** save the layout, fixed values and column mapping, in `data/templates/`. Samples from the `samples/` folder are listed after your own, as *Sample: Bin label* and so on. They open like any template but can't be changed, so save one under a name of your own to keep your edits. `samples/parts.csv` is sample data for *Sample: Bin label*.
 
 ![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{size}}-5, printing as INS-M3-5](docs/images/multi-select.png)
 

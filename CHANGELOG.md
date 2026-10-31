@@ -2,6 +2,26 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.3.1 · 2026-10-30
+
+Fixes, requests from other sites refused, and samples kept apart from your templates.
+
+### Added
+
+- Tests for the server side, using Python's built-in `unittest`, so nothing more is installed. Run them with `sh test.sh`.
+
+### Fixed
+
+- *Cut each label* was ignored, and every label was cut, whenever a label had hidden text or a blank QR code or barcode. This came in with 0.2.2.
+- The print warning for blank QR codes and barcodes counted codes instead of labels, so two empty codes on one label read "on 2 labels".
+- Some errors while printing or loading data showed only "500 Internal Server Error": a copies value that isn't a number, an unknown tape, or a damaged spreadsheet. Every error from the app now comes back as a message the editor shows, and a damaged spreadsheet is reported as damaged.
+
+### Changed
+
+- Requests from other sites are refused. A web page open in the same browser could send a print job or change the printer address. The app now accepts changes only as JSON, which other sites can't send without the app's permission, and answers only to its own names, `127.0.0.1` and `localhost`, unless started with `--lan`.
+- Sample templates and data are in a new `samples/` folder, listed after your own templates as *Sample: Bin label*. They open like any template but can't be saved over or deleted. Opening one leaves the name box empty, so saving makes a copy under a name of your own. `data/` now holds only your templates and settings, and is no longer part of the repository. An existing `data/templates/Bin label.json` stays, as a template of your own.
+- The sample template and sample data use lowercase fields: `{{item}}`, `{{location}}` and `{{code}}`.
+
 ## 0.3.0 · 2026-10-30
 
 Data from spreadsheets, and fields that tidy up after themselves.

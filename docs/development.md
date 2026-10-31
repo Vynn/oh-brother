@@ -6,9 +6,10 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `printer.py`), web UI (`static/`), fonts | Yes |
-| `data/templates/` | Saved templates | Yes |
-| `data/samples/` | Sample data | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
+| `tests/` | Server-side tests | Yes |
+| `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
+| `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
 | `docs/images/` | Screenshots for the README | Yes |
 | `runtime/<platform>/` | Standalone Python | No, built |
@@ -27,6 +28,16 @@ sh run.sh
 
 `.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
 
+## Tests
+
+```sh
+sh test.sh
+```
+
+The tests use Python's built-in `unittest`, so they run on the bundled runtime with nothing more to install. Options go to `unittest`: `sh test.sh -v` lists each test, and `sh test.sh -k cut` runs the tests whose names contain `cut`.
+
+They cover the server side: filling fields, reading data files, and the API, run against a temporary data folder. Spreadsheets are built in memory. Printing is a dry run, so nothing is sent to a printer. The editor in `app/static/` has no tests yet; it would need a browser to drive it.
+
 ## How printing works
 
 `render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print.
@@ -39,9 +50,18 @@ Each editor page holds `GET /api/alive` open: an event stream the server writes 
 
 On Linux, the launcher reads the default browser from `xdg-settings` and its command from the `.desktop` file, and passes `--new-window` for browsers known to accept it (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar). Anything else goes to `xdg-open`, which usually opens a tab.
 
+## Requests from other sites
+
+The app has no login, so `server.py` checks every request in `guard()`:
+
+- **Host name.** A site can point one of its own names at `127.0.0.1` (DNS rebinding), and the browser then treats the app as part of that site. Its pages send that name as the `Host`, so requests are refused with 403 unless the host is `127.0.0.1`, `localhost` or `::1`. With `--lan`, other machines reach the app by whatever name they know it by, so the check is off.
+- **JSON only.** A page on another site can send a form or plain text to any address without asking, but it can send JSON only after a CORS check, which this server never answers. So every `POST` or `PUT` must be sent as JSON, or it's refused with 415. The one exception is the data upload, a form, which only reads the file and changes nothing.
+
+Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the editor shows. Unexpected errors are 500s, and their tracebacks go to the terminal.
+
 ## Data files
 
-`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. Text is decoded as UTF-8, then Windows-1252, then Latin-1, and the delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is still `POST /api/csv`.
+`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text is decoded as UTF-8, then Windows-1252, then Latin-1, and the delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is still `POST /api/csv`.
 
 `printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
 

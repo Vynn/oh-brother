@@ -6,19 +6,23 @@ import os
 import re
 import threading
 import time
-import xml.etree.ElementTree as ET
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
+from werkzeug.exceptions import HTTPException, InternalServerError
 
 import printer
 import render
 import tables
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+# Sample templates and data, shipped with the app and read-only. The data
+# folder holds only the user's own templates and settings.
+SAMPLES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples")
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}   # names this machine is reached by without --lan
 
 
 class Presence:
@@ -47,10 +51,38 @@ class Presence:
             return time.monotonic() - self.idle_since
 
 
-def create_app(data_dir):
+def blank_code_warnings(blanks, copies):
+    """Print warnings for QR codes and barcodes left blank, counted by label.
+
+    `blanks` holds render()'s blank list for each record. Text hidden because
+    its fields are empty isn't counted: hiding it is intended.
+    """
+    counts = {}
+    for blank in blanks:
+        # A set, so two blank codes on one label count that label once
+        for key in {(x["type"], x["why"]) for x in blank if x["type"] != "text"}:
+            counts[key] = counts.get(key, 0) + copies
+    out = []
+    for (kind, why), n in sorted(counts.items()):
+        name = "QR code" if kind == "qr" else "Barcode"
+        out.append(f"{name} {why} on {n} label{'' if n == 1 else 's'}; printed blank")
+    return out
+
+
+def is_local_host(host):
+    """True if a request's Host header names this machine."""
+    try:
+        return urlsplit("//" + host).hostname in LOCAL_HOSTS
+    except ValueError:   # malformed, e.g. an unclosed [ for IPv6
+        return False
+
+
+def create_app(data_dir, lan=False, samples_dir=SAMPLES):
+    """The app. `lan`: other machines may connect, by any name for this one."""
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
     tpl_dir = os.path.join(data_dir, "templates")
+    sample_dir = os.path.join(samples_dir, "templates")
     cfg_path = os.path.join(data_dir, "config.json")
     os.makedirs(tpl_dir, exist_ok=True)
     app.presence = Presence()
@@ -64,14 +96,63 @@ def create_app(data_dir):
             pass
         return cfg
 
-    def tpl_path(name):
+    def tpl_path(name, folder=tpl_dir):
         safe = re.sub(r"[^\w\- ]+", "", name).strip()
         if not safe:
             abort(400, "Invalid template name")
-        return os.path.join(tpl_dir, safe + ".json")
+        return os.path.join(folder, safe + ".json")
+
+    def tpl_names(folder):
+        try:
+            return sorted(n[:-5] for n in os.listdir(folder) if n.endswith(".json"))
+        except OSError:   # e.g. no samples folder
+            return []
+
+    def read_tpl(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return jsonify(json.load(f))
+        except OSError:
+            abort(404, "No template by that name")
 
     def body():
-        return request.get_json(force=True, silent=True) or {}
+        data = request.get_json(silent=True)   # guard() has made sure it's sent as JSON
+        if not isinstance(data, dict):
+            abort(400, "Expected a JSON object")
+        return data
+
+    # ---- requests from other sites ------------------------------------------
+
+    @app.before_request
+    def guard():
+        # A site can point its own name at 127.0.0.1 ("DNS rebinding"), and the
+        # browser then treats this app as part of that site. Its pages send
+        # that name as the Host, so only this machine's own names are let in.
+        # With --lan, other machines use whatever name they know it by.
+        if not lan and not is_local_host(request.host):
+            abort(403, "Unknown host name; open the app at 127.0.0.1 or localhost")
+        # Pages on other sites can send forms and plain text here without
+        # asking, but JSON only after a CORS check this server never answers.
+        # So anything with a body must be JSON. The data upload is a form, but
+        # it only reads the file and changes nothing.
+        if request.method in ("POST", "PUT", "PATCH") and request.endpoint != "parse_csv" \
+                and not request.is_json:
+            abort(415, "Requests must be sent as JSON")
+
+    # ---- errors: the API answers in JSON, which the editor shows -----------
+
+    @app.errorhandler(HTTPException)
+    def http_error(e):
+        if request.path.startswith("/api/"):
+            return jsonify(error=e.description), e.code
+        return e
+
+    @app.errorhandler(Exception)
+    def server_error(e):
+        app.logger.exception("Error on %s", request.path)
+        if request.path.startswith("/api/"):
+            return jsonify(error=f"Server error: {str(e) or type(e).__name__}"), 500
+        return InternalServerError()
 
     # ---- pages -------------------------------------------------------------
 
@@ -154,24 +235,24 @@ def create_app(data_dir):
         layout = b.get("layout", {})
         records = b.get("records") or [{}]
         chain = set(b.get("chain") or ())   # fields whose fixed values may hold {{tags}}
-        copies = max(1, min(100, int(b.get("copies", 1))))
+        try:
+            copies = max(1, min(100, int(b.get("copies", 1))))
+        except (TypeError, ValueError):
+            return jsonify(error="Copies must be a whole number"), 400
         dry_run = bool(b.get("dry_run"))
         if not cfg["printer_host"] and not dry_run:
             return jsonify(error="Set the printer address first"), 400
 
-        images, warnings, blanks = [], [], {}
-        for rec in records:
-            img, w, blank = render.render(layout, rec, keep_missing=False, chain=chain)
-            warnings += [x for x in w if x not in warnings]
-            images += [img] * copies
-            for b in blank:   # count labels printed with a blank code
-                if b["type"] == "text":
-                    continue   # text with empty fields is hidden on purpose
-                key = (b["type"], b["why"])
-                blanks[key] = blanks.get(key, 0) + copies
-        for (kind, why), n in blanks.items():
-            name = "QR code" if kind == "qr" else "Barcode"
-            warnings.append(f"{name} {why} on {n} label{'' if n == 1 else 's'}; printed blank")
+        images, warnings, blanks = [], [], []
+        try:
+            for rec in records:
+                img, w, blank = render.render(layout, rec, keep_missing=False, chain=chain)
+                warnings += [x for x in w if x not in warnings]
+                images += [img] * copies
+                blanks.append(blank)
+        except Exception as e:   # as for the preview: a bad layout or record
+            return jsonify(error=f"Rendering failed: {e}"), 400
+        warnings += blank_code_warnings(blanks, copies)
         try:
             job = printer.build_job(layout, images, cfg["model"], cut=b.get("cut", True))
         except Exception as e:
@@ -193,10 +274,8 @@ def create_app(data_dir):
             return jsonify(error="No file"), 400
         try:
             rows = tables.read_table(f.filename or "", f.read())
-        except ValueError as e:
+        except tables.TableError as e:
             return jsonify(error=str(e)), 400
-        except ET.ParseError:
-            return jsonify(error="The file looks damaged"), 400
         rows = [r for r in rows if any(c.strip() for c in r)]
         if not rows:
             return jsonify(error="The file has no rows"), 400
@@ -208,16 +287,17 @@ def create_app(data_dir):
 
     @app.get("/api/templates")
     def list_templates():
-        names = sorted(n[:-5] for n in os.listdir(tpl_dir) if n.endswith(".json"))
-        return jsonify(templates=names)
+        return jsonify(templates=tpl_names(tpl_dir), samples=tpl_names(sample_dir))
 
     @app.get("/api/templates/<name>")
     def get_template(name):
-        try:
-            with open(tpl_path(name), encoding="utf-8") as f:
-                return jsonify(json.load(f))
-        except OSError:
-            abort(404)
+        return read_tpl(tpl_path(name))
+
+    # Samples can be opened but not saved over or deleted: saving writes a
+    # template of the user's own
+    @app.get("/api/samples/<name>")
+    def get_sample(name):
+        return read_tpl(tpl_path(name, sample_dir))
 
     @app.put("/api/templates/<name>")
     def put_template(name):
@@ -230,7 +310,7 @@ def create_app(data_dir):
         try:
             os.remove(tpl_path(name))
         except OSError:
-            abort(404)
+            abort(404, "No template by that name")
         return jsonify(ok=True)
 
     return app

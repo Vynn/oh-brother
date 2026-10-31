@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
@@ -111,7 +111,7 @@ def main():
 
     port = free_port(args.port)
     url = f"http://127.0.0.1:{port}/"
-    app = create_app(os.path.abspath(args.data))
+    app = create_app(os.path.abspath(args.data), lan=args.lan)
     server = make_server("0.0.0.0" if args.lan else "127.0.0.1", port, app, threaded=True)
     # Stop with the window only when we opened it, and not when other machines may use it
     auto_stop = not args.no_browser and not args.lan

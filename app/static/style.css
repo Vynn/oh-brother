@@ -139,6 +139,10 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
 .tpl-list li button.name { flex: 1; text-align: left; border-color: transparent; background: none; padding: 0 6px; }
 .tpl-list li button.name:hover { background: var(--surface); border-color: var(--line); }
 .tpl-list .empty { color: var(--faint); padding: 4px 0; }
+/* Samples: below your own templates, quieter, with no delete button */
+.tpl-list li.own + li.sample { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 6px; }
+.tpl-list li.sample button.name { color: var(--muted); }
+.tpl-list li.sample .prefix { color: var(--faint); }
 
 /* ---- centre ----------------------------------------------------------- */
 .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }

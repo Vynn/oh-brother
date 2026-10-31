@@ -1247,21 +1247,28 @@ function drawPresets() {
 // ---------------------------------------------------------------------------
 
 async function drawTemplates() {
-  const { templates } = await api("/api/templates");
-  $("#tplList").replaceChildren(...(templates.length ? templates.map((n) => h("li", {},
+  const { templates, samples = [] } = await api("/api/templates");
+  const own = templates.map((n) => h("li", { class: "own" },
     h("button", { class: "name", onclick: () => loadTemplate(n) }, n),
     h("button", { class: "icon", title: "Delete template", onclick: async () => {
       if (!confirm(`Delete template “${n}”?`)) return;
       await api(`/api/templates/${encodeURIComponent(n)}`, { method: "DELETE" });
       drawTemplates();
-    } }, "×"))) : [h("li", { class: "empty" }, "None saved yet")]));
+    } }, "×")));
+  // Samples ship with the app, after your own. They open like templates but
+  // can't be saved over or deleted.
+  const shipped = samples.map((n) => h("li", { class: "sample" },
+    h("button", { class: "name", title: "Sample template. Save it under a name of your own to keep your changes.",
+      onclick: () => loadTemplate(n, true) }, h("span", { class: "prefix" }, "Sample: "), n)));
+  const items = [...own, ...shipped];
+  $("#tplList").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "None saved yet")]));
 }
 
-async function loadTemplate(n) {
-  const j = await api(`/api/templates/${encodeURIComponent(n)}`);
+async function loadTemplate(n, sample = false) {
+  const j = await api(`/api/${sample ? "samples" : "templates"}/${encodeURIComponent(n)}`);
   S.layout = j.layout; S.fixed = lowerKeys(j.fixed);
   if (j.mapping) S.mapping = { ...S.mapping, ...lowerKeys(j.mapping) };
-  $("#tplName").value = n;
+  $("#tplName").value = sample ? "" : n;   // so Save asks for a name, and can't overwrite one of yours
   S.sel = -1; S.pick = new Set();
   drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
 }
@@ -1415,7 +1422,7 @@ async function saveSettings() {
 }
 
 async function testPrinter(target) {
-  const j = await api("/api/test", { method: "POST" });
+  const j = await api("/api/test", { method: "POST", body: {} });   // the server takes only JSON
   drawPrinterChip(j.ok);
   if (target) { target.textContent = j.message; target.className = "status " + (j.ok ? "ok" : "err"); }
   return j.ok;

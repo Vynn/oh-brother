@@ -2,7 +2,7 @@
 
 Supported: delimited text (CSV, TSV, semicolon or pipe), OpenDocument
 spreadsheets (.ods, flat .fods), Excel workbooks (.xlsx) and JSON. Spreadsheets
-give the first sheet. Anything else raises ValueError with a message for the user.
+give the first sheet. Anything else raises TableError with a message for the user.
 """
 
 import csv
@@ -13,6 +13,7 @@ import posixpath
 import re
 import xml.etree.ElementTree as ET
 import zipfile
+import zlib
 
 MAX_XML = 64 * 1024 * 1024   # largest unpacked sheet we'll parse
 
@@ -32,26 +33,42 @@ def q(tag):
     return "{%s}%s" % (NS[p], name)
 
 
+class TableError(ValueError):
+    """A file that can't be read, with a message for the user."""
+
+
+# What a file that isn't what it claims to be raises in the zip, XML and
+# number handling below: a missing part, a bad index, a value that isn't a number
+DAMAGED = (zipfile.BadZipFile, zlib.error, EOFError, ET.ParseError,
+           KeyError, IndexError, StopIteration, ValueError)
+
+
 def read_table(name, raw):
     """Rows (lists of strings) from an uploaded file's name and bytes."""
+    try:
+        return _read(name, raw)
+    except TableError:
+        raise
+    except DAMAGED:
+        raise TableError("The file looks damaged") from None
+
+
+def _read(name, raw):
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     if raw[:4] == b"PK\x03\x04":
-        try:
-            z = zipfile.ZipFile(io.BytesIO(raw))
-        except zipfile.BadZipFile:
-            raise ValueError("The file looks damaged")
+        z = zipfile.ZipFile(io.BytesIO(raw))
         names = set(z.namelist())
         if "content.xml" in names:
             return _ods_rows(ET.fromstring(_member(z, "content.xml")))
         if "xl/workbook.xml" in names:
             return _xlsx_rows(z)
-        raise ValueError(_unsupported(ext))
+        raise TableError(_unsupported(ext))
     if raw[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
-        raise ValueError("Old Excel files (.xls) aren't supported. Save it as .xlsx, .ods or CSV.")
+        raise TableError("Old Excel files (.xls) aren't supported. Save it as .xlsx, .ods or CSV.")
     text = _decode(raw)
     head = text[:8192]
     if sum(c < " " and c not in "\t\n\r\f" for c in head) > len(head) // 100:
-        raise ValueError(_unsupported(ext))
+        raise TableError(_unsupported(ext))
     stripped = text.lstrip()
     if ext == "fods" or (stripped.startswith("<?xml") and "opendocument" in stripped[:2000]):
         return _ods_rows(ET.fromstring(raw))
@@ -67,7 +84,7 @@ def _unsupported(ext):
 
 def _member(z, path):
     if z.getinfo(path).file_size > MAX_XML:
-        raise ValueError("The sheet is too large")
+        raise TableError("The sheet is too large")
     return z.read(path)
 
 
@@ -96,11 +113,11 @@ def _json_rows(text):
     try:
         data = json.loads(text)
     except ValueError as e:
-        raise ValueError(f"The JSON can't be read: {e}")
+        raise TableError(f"The JSON can't be read: {e}")
     if isinstance(data, dict):   # {"rows": [...]}: take the first list inside
         data = next((v for v in data.values() if isinstance(v, list)), None)
     if not isinstance(data, list):
-        raise ValueError("The JSON needs a list of rows")
+        raise TableError("The JSON needs a list of rows")
 
     def cell(v):
         if v is None:
@@ -118,7 +135,7 @@ def _json_rows(text):
         for r in data:
             headers += [k for k in r if k not in headers]
         return [headers] + [[cell(r.get(h)) for h in headers] for r in data]
-    raise ValueError("The JSON rows must all be objects, or all be lists")
+    raise TableError("The JSON rows must all be objects, or all be lists")
 
 
 # ---- OpenDocument (.ods, .fods) ----------------------------------------------
@@ -143,7 +160,7 @@ def _odf_text(el):
 def _ods_rows(root):
     sheet = root.find(".//" + q("table:table"))
     if sheet is None:
-        raise ValueError("The spreadsheet has no sheets")
+        raise TableError("The spreadsheet has no sheets")
     rows = []
     # Rows may sit inside header-row or row-group wrappers
     for row in sheet.iter(q("table:table-row")):
@@ -175,7 +192,7 @@ def _xlsx_rows(z):
     wb = ET.fromstring(_member(z, "xl/workbook.xml"))
     first = wb.find(f"{q('x:sheets')}/{q('x:sheet')}")
     if first is None:
-        raise ValueError("The workbook has no sheets")
+        raise TableError("The workbook has no sheets")
     rels = ET.fromstring(_member(z, "xl/_rels/workbook.xml.rels"))
     rid = first.get(q("r:id"))
     target = next(r.get("Target") for r in rels.iter(q("rel:Relationship")) if r.get("Id") == rid)

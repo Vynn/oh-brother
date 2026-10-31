@@ -42,7 +42,7 @@ They cover the server side: filling fields, reading data files, the API, run aga
 
 `render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print.
 
-The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with warnings and field names in URL-encoded JSON headers. Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
+The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
 ## Launching and stopping
 
@@ -77,7 +77,7 @@ Element positions are in millimetres from the top left of the printable area, wh
 
 These cut sizes are derived from brother_ql's label data, not measured.
 
-Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid.
+Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid, or 0.02 in (0.508 mm) when using inches. Positions are stored to 0.01 mm, so snapped centres stay exact, including after the label is reshaped.
 
 ## Fields
 

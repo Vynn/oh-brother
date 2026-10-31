@@ -76,6 +76,18 @@ class Preview(ApiTest):
         self.assertEqual(header(resp, "X-Blank"), [{"i": 1, "type": "qr", "why": "empty"}])
         self.assertEqual(header(resp, "X-Warnings"), [])
 
+    def test_text_max_size_and_line_spacing(self):
+        def ink_height(**opts):
+            box = {"type": "text", "x": 2, "y": 2, "w": 50, "h": 20, "text": "Ab\nAb", "size": 0, **opts}
+            img = render.render(layout(box))[0].convert("L").point(lambda v: 255 if v < 128 else 0)
+            top, bottom = img.getbbox()[1::2]
+            return bottom - top
+        auto = ink_height()
+        self.assertLess(ink_height(max_size=8), auto * 0.6)   # shrink to fit, but no larger than 8 pt
+        self.assertLess(ink_height(size=8, max_size=40), auto * 0.6)   # a set size ignores it
+        tight, loose = ink_height(size=8), ink_height(size=8, spacing=2)
+        self.assertGreater(loose, tight * 1.4)
+
     def test_hidden_text_is_listed_as_blank(self):
         resp = self.post("/api/render", {"layout": layout(TITLE), "record": {}})
         self.assertEqual(header(resp, "X-Blank"), [{"i": 0, "type": "text", "why": "empty"}])

@@ -144,7 +144,6 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
 .tpl-list li.sample button.name { color: var(--muted); }
 .tpl-list li.sample .prefix { color: var(--faint); }
 .status.tpl-status { margin-top: 6px; }   /* .status, later in this file, sets margin: 0 */
-.tpl-status:empty { display: none; }
 
 /* ---- centre ----------------------------------------------------------- */
 .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
@@ -176,8 +175,9 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
   content: "Editing"; position: absolute; left: -2px; bottom: 100%; margin-bottom: 2px;
   padding: 0 5px; font: 600 10px/16px var(--font); color: #fff; background: var(--accent); border-radius: 3px 3px 0 0;
 }
-/* Empty or invalid QR/barcode: hatched placeholder in the selection blue, so it
-   can't pass for a printed code. Drawn only in the editor, never in the image. */
+/* Blank element (a QR code or barcode with empty or invalid data, or text whose
+   fields are all empty): hatched in the selection blue, so it can't pass for
+   something printed. Drawn only in the editor, never in the image. */
 .box.blank {
   outline: 1px dashed rgba(47,111,223,.55);
   background: repeating-linear-gradient(-45deg, rgba(47,111,223,.13) 0 1px, transparent 1px 6px);
@@ -248,6 +248,8 @@ table { border-collapse: collapse; }
 .status { color: var(--muted); font-size: 12px; margin: 0; }
 .status.ok { color: var(--ok); }
 .status.err { color: var(--red); }
+/* Template and data messages take no room until there is one */
+.tpl-status:empty, .data-status:empty { display: none; }
 
 /* ---- right ------------------------------------------------------------ */
 .add-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; margin-bottom: 10px; }
@@ -261,7 +263,7 @@ table { border-collapse: collapse; }
 .el-list li.sel { background: #e9effb; }
 .el-list .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--ink); flex: none; }
 .el-list .swatch.red { background: var(--red); }
-.el-list .kind { font-size: 11px; color: var(--faint); width: 48px; flex: none; text-transform: uppercase; letter-spacing: .04em; }
+.el-list .kind { font-size: 11px; color: var(--faint); width: 60px; flex: none; text-transform: uppercase; letter-spacing: .04em; }
 .el-list .txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .el-list .acts { display: none; }
 .el-list li:hover .acts, .el-list li.sel .acts { display: flex; }

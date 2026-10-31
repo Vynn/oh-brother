@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 
-VERSION = "0.3.2"
+VERSION = "0.3.3"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
@@ -126,8 +126,7 @@ def main():
                     os.path.join(ROOT, "vendor", "common")]
     from server import create_app
 
-    # Hide per-request logs and the "development server" warning: this is a
-    # single-user local tool, not a public deployment.
+    # Hide Werkzeug's log line for every request: this is a single-user local tool
     import logging
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 

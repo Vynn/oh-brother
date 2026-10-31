@@ -112,7 +112,7 @@ def placeholders(layout):
 
 
 def fill(template, record, keep_missing, chain=(), warnings=None):
-    """Replace {{Name}} with record values, then the built-in date/time.
+    """Replace {{Name}} with the record's value, or else a built-in date or time.
 
     Values of the fields named in `chain` (fixed text typed by the user) may
     themselves contain {{Name}} and are filled in turn. Other values (CSV
@@ -326,6 +326,8 @@ def _draw_barcode(mask, el, data, warnings):
     if not data:
         return "empty"
     try:
+        # Code 128. A template may name another python-barcode type, but the
+        # editor offers only this one.
         modules = pybarcode.get(el.get("symbology", "code128"), data).build()[0]
     except Exception as e:
         warnings.append(f"Barcode error: {e}")
@@ -361,7 +363,7 @@ def _draw_rect(mask, el):
 
 
 def render(layout, record=None, keep_missing=True, chain=()):
-    """Render a layout. Returns (RGB image, warning strings, blank codes).
+    """Render a layout. Returns (RGB image, warning strings, blank elements).
 
     Blank elements drew nothing: QR codes and barcodes with empty or invalid
     data, and text whose fields are all empty, as
@@ -377,8 +379,6 @@ def render(layout, record=None, keep_missing=True, chain=()):
     red_downgraded = False
 
     for i, el in enumerate(layout.get("elements", [])):
-        if el.get("hidden"):
-            continue
         x, y = mm(el.get("x", 0)), mm(el.get("y", 0))
         w, h = max(1, mm(el.get("w", 10))), max(1, mm(el.get("h", 10)))
         color = el.get("color", "black")

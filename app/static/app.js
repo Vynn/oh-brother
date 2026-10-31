@@ -1,6 +1,7 @@
 // Oh-Brother frontend. Plain JS, no build step.
-// The server renders every preview; this file only edits the layout (all
-// geometry in mm), draws selection boxes over the preview, and manages data.
+// The server renders every preview and print. This file edits the layout
+// (all geometry in mm), draws selection and guides over the preview, and
+// handles undo, data, templates and printing.
 
 "use strict";
 
@@ -39,18 +40,18 @@ const S = {
   editing: -1,          // element whose text field has focus
   alignTo: "selection", // several selected: align to "selection" or "label"
   fixed: {},            // field key (lowercase) -> fixed text
-  csv: null,            // {headers, rows}
-  mapping: {},          // placeholder -> column name ("" = fixed text)
-  picked: new Set(),    // selected CSV row indexes
-  cur: 0,               // CSV row shown in preview
-  placeholders: [],
-  blank: new Map(),   // element index -> "empty"|"invalid" for codes that drew nothing
+  csv: null,            // loaded data, from any data file: {headers, rows}
+  mapping: {},          // field key (lowercase) -> column name ("" = fixed text)
+  picked: new Set(),    // data rows ticked for printing
+  cur: 0,               // data row shown in the preview
+  placeholders: [],     // the layout's field names, from the last preview
+  blank: new Map(),     // element index -> "empty"|"invalid": codes and text the last preview left blank
   scale: 1,             // screen px per dot
 };
 
 const STORE = "oh-brother:v1";
 const save = () => { clearTimeout(saveTimer); try { localStorage.setItem(STORE, JSON.stringify({ layout: S.layout, fixed: S.fixed })); } catch {} };
-// Coalesce saves: dragging changes the layout every frame
+// Coalesce saves to this browser's storage: dragging changes the layout every frame
 let saveTimer = 0;
 const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 400); };
 addEventListener("pagehide", save);
@@ -144,8 +145,8 @@ function paperMM() {
   return { mx, my, w: c.w + 2 * mx, h: c.h + 2 * my };
 }
 
-const r1 = (v) => Math.round(v * 10) / 10;
-const r2 = (v) => Math.round(v * 100) / 100;   // snapped positions (centres) need 0.01 mm
+const r1 = (v) => Math.round(v * 10) / 10;     // shown lengths, new elements' sizes
+const r2 = (v) => Math.round(v * 100) / 100;   // stored positions: snapped centres need 0.01 mm
 // Display units. Layouts are stored, rendered and printed in mm; inches are
 // only shown and typed. Each browser remembers its choice; mm by default.
 const UNITS = "oh-brother:units", INCH = 25.4;
@@ -187,7 +188,7 @@ const T = (o) => ({ type: "text", color: "black", font: "sans", bold: false, siz
 // fits(W, H, red) returns "" or the reason the layout can't work at that size
 // (or tape); without one, the built elements are checked by checkEls().
 // cat is the layout's category in the panel (CATS).
-// Field names are shared ({{title}}, {{body}}, {{code}}) so values carry over
+// Field names are shared ({{title}}, {{body}}, {{code}}, {{price}}) so values carry over
 // when switching layouts.
 
 // Margin scales with the short side: 2 mm on 62 mm tape, 0.5 mm on 12 mm
@@ -533,12 +534,12 @@ function lowerKeys(obj) {
   return out;
 }
 
-// A field takes fixed text unless a CSV is loaded and it's mapped to a column
+// A field takes fixed text unless data is loaded and it's mapped to a column
 const isFixed = (p) => !(S.csv && S.mapping[fkey(p)]);
 
 // The layout's fields, plus any field named inside a fixed value, so that
 // {{code}} = "{{item}}" gives Item a row even when the layout doesn't use it.
-// CSV column names are left out: those come straight from the row.
+// Data column names are left out: those come straight from the row.
 function fields() {
   const out = [...S.placeholders], keys = new Set(out.map(fkey));
   const cols = new Set((S.csv?.headers || []).map(fkey));
@@ -555,7 +556,7 @@ function fields() {
 // Fields whose fixed values may themselves contain {{tags}} (sent as "chain")
 const chain = () => fields().filter(isFixed);
 
-// Build the field->value record for one CSV row (or fixed values only). The
+// Build the field->value record for one data row (or fixed values only). The
 // row's own columns go in first, so a fixed value can refer to any column.
 function record(row) {
   const rec = row ? { ...row } : {};
@@ -929,7 +930,8 @@ function distribute(vert) {
 }
 
 // Keyboard: nudge with arrows (0.5 mm, Shift = 2 mm; in inches 0.02 in,
-// Shift = 0.1 in), Delete removes, Ctrl+A selects all
+// Shift = 0.1 in), Delete or Backspace removes, Escape deselects, Ctrl+A
+// selects all
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, textarea, select") || $("#settings").open) return;
   if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
@@ -959,7 +961,7 @@ $("#overlay").addEventListener("dblclick", (ev) => {
 // Elements list & properties
 // ---------------------------------------------------------------------------
 
-const KIND = { text: "Text", qr: "QR", barcode: "Code", rect: "Box" };
+const KIND = { text: "Text", qr: "QR", barcode: "Barcode", rect: "Box" };
 const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h) : e.data;
 
 // Selection: S.pick is the set of selected indexes; S.sel is the one shown in
@@ -1010,7 +1012,7 @@ function drawList() {
   $("#elList").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
 }
 
-// Each copy goes just above its original, offset 2 mm; the copies end up selected
+// Each copy is stacked just above its original, 2 mm right and down; the copies end up selected
 function dupEls(idx) {
   const els = S.layout.elements, copies = new Set();
   idx.slice().sort((a, b) => b - a).forEach((i) => {
@@ -1110,7 +1112,7 @@ function drawProps(light = false) {
     return;
   }
   const redOK = tape().red;
-  const kids = [h("h2", {}, KIND[e.type] === "Code" ? "Barcode" : KIND[e.type])];
+  const kids = [h("h2", {}, KIND[e.type])];
 
   if (e.type === "text") {
     kids.push(fld("Text", editing(bind("text", h("textarea", { rows: 3, spellcheck: false })))));
@@ -1125,10 +1127,17 @@ function drawProps(light = false) {
 
   if (e.type === "text") {
     const font = h("select", {}, ...S.meta.fonts.map((f) => h("option", { value: f }, { sans: "Sans", narrow: "Narrow", serif: "Serif", mono: "Mono" }[f] || f)));
-    kids.push(h("div", { class: "row2" },
-      fld("Font", bind("font", font)),
-      fld("Size (pt)", bind("size", h("input", { type: "number", min: 0, step: 1, placeholder: "auto" }), (v) => +v || 0))));
-    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Size 0 = shrink to fit the box"));
+    const size = bind("size", h("input", { type: "number", min: 0, step: 1, placeholder: "auto" }), (v) => +v || 0);
+    // Max size only limits shrink-to-fit, so it's off while a size is set
+    const max = bind("max_size", h("input", { type: "number", min: 0, step: 1, placeholder: "none" }), (v) => +v || 0);
+    const maxOff = () => { max.disabled = e.size > 0; };
+    size.addEventListener("input", maxOff);
+    maxOff();
+    const spacing = bind("spacing", h("input", { type: "number", min: 0.5, max: 3, step: 0.1, placeholder: "1" }),
+      (v) => Math.min(3, Math.max(0.5, +v || 1)));
+    kids.push(h("div", { class: "row2" }, fld("Font", bind("font", font)), fld("Size (pt)", size)));
+    kids.push(h("div", { class: "row2" }, fld("Max size (pt)", max), fld("Line spacing", spacing)));
+    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Size 0 = shrink to fit the box, up to Max size"));
     kids.push(h("div", { class: "field" }, "Align", seg("align", [["left", "Left"], ["center", "Centre"], ["right", "Right"]])));
     kids.push(h("div", { class: "field" }, "Vertical", seg("valign", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]])));
     kids.push(h("div", { class: "checks" }, chk("bold", "Bold"), chk("wrap", "Wrap"), chk("invert", "Inverted")));
@@ -1180,11 +1189,11 @@ function reshape(change) {
   const kx = b.w / a.w, ky = b.h / a.h;
   if (Math.abs(kx - 1) > 1e-6 || Math.abs(ky - 1) > 1e-6) {
     for (const e of S.layout.elements) {
-      e.x = r1(e.x * kx); e.w = r1(e.w * kx);
-      e.y = r1(e.y * ky); e.h = r1(e.h * ky);
+      e.x = r2(e.x * kx); e.w = r2(e.w * kx);
+      e.y = r2(e.y * ky); e.h = r2(e.h * ky);
       if (e.type === "qr") {
         const s = Math.min(e.w, e.h);
-        e.x = r1(e.x + (e.w - s) / 2); e.y = r1(e.y + (e.h - s) / 2); e.w = e.h = s;
+        e.x = r2(e.x + (e.w - s) / 2); e.y = r2(e.y + (e.h - s) / 2); e.w = e.h = s;
       }
     }
   }
@@ -1303,7 +1312,7 @@ $("#tplSave").addEventListener("click", async () => {
 $("#tplName").addEventListener("input", () => status("", "", "#tplStatus"));
 
 // ---------------------------------------------------------------------------
-// Data: fields table, CSV rows
+// Data: fields table, data rows
 // ---------------------------------------------------------------------------
 
 function drawData() {
@@ -1331,34 +1340,51 @@ function drawData() {
 
   $("#rowsWrap").hidden = !S.csv;
   $("#csvClear").hidden = !S.csv;
-  if (S.csv) {
-    $("#csvInfo").textContent = `${S.csv.rows.length} rows · ${S.picked.size} selected · click a row to preview it`;
-    drawRows();
-  } else {
-    $("#csvInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
-  }
-  drawPrintButton();
+  if (!S.csv) $("#csvInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
+  drawPicked();
 }
 
+// The rows table is built only when data is loaded: rebuilding it takes about
+// a second per 5,000 rows. Clicks and ticks update it in place.
+
 function drawRows() {
+  if (!S.csv) { $("#rows").replaceChildren(); return; }
   const { headers, rows } = S.csv;
-  const all = h("input", { type: "checkbox", title: "Select all" });
-  all.checked = S.picked.size === rows.length;
-  all.indeterminate = S.picked.size > 0 && S.picked.size < rows.length;
+  const all = h("input", { type: "checkbox", title: "Select all", class: "all" });
   all.addEventListener("change", () => {
     S.picked = all.checked ? new Set(rows.map((_, i) => i)) : new Set();
-    drawData();
+    for (const cb of $("#rows tbody").querySelectorAll("input")) cb.checked = all.checked;
+    drawPicked();
   });
   const thead = h("thead", {}, h("tr", {}, h("th", {}, all), h("th", {}, "#"), ...headers.map((c) => h("th", {}, c))));
   const tbody = h("tbody", {}, ...rows.map((r, i) => {
     const cb = h("input", { type: "checkbox" });
     cb.checked = S.picked.has(i);
-    cb.addEventListener("click", (ev) => ev.stopPropagation());
-    cb.addEventListener("change", () => { cb.checked ? S.picked.add(i) : S.picked.delete(i); drawData(); });
-    return h("tr", { class: i === S.cur ? "cur" : "", onclick: () => { S.cur = i; drawRows(); schedule(); } },
+    cb.addEventListener("click", (ev) => ev.stopPropagation());   // ticking doesn't preview the row
+    cb.addEventListener("change", () => { cb.checked ? S.picked.add(i) : S.picked.delete(i); drawPicked(); });
+    return h("tr", { class: i === S.cur ? "cur" : "", onclick: () => showRow(i) },
       h("td", {}, cb), h("td", { class: "n" }, i + 1), ...headers.map((c) => h("td", { title: r[c] }, r[c])));
   }));
   $("#rows").replaceChildren(thead, tbody);
+  drawPicked();
+}
+
+function showRow(i) {
+  const body = $("#rows tbody");
+  body.children[S.cur]?.classList.remove("cur");
+  body.children[i].classList.add("cur");
+  S.cur = i;
+  schedule();
+}
+
+// The selection count, the Select all box, and the print button
+function drawPicked() {
+  if (S.csv) {
+    const n = S.csv.rows.length, all = $("#rows .all");
+    $("#csvInfo").textContent = `${n} rows · ${S.picked.size} selected · click a row to preview it`;
+    if (all) { all.checked = S.picked.size === n; all.indeterminate = S.picked.size > 0 && S.picked.size < n; }
+  }
+  drawPrintButton();
 }
 
 $("#csvFile").addEventListener("change", async (ev) => {
@@ -1366,16 +1392,21 @@ $("#csvFile").addEventListener("change", async (ev) => {
   if (!f) return;
   const fd = new FormData();
   fd.append("file", f);
+  status("", "", "#dataStatus");
   try {
     S.csv = await api("/api/csv", { method: "POST", body: fd });
     S.picked = new Set(S.csv.rows.map((_, i) => i));
     S.cur = 0;
-    autoMap(); drawData(); schedule();
-  } catch (e) { status(e.message, "err"); }
+    autoMap(); drawRows(); drawData(); schedule();
+  } catch (e) { status(e.message, "err", "#dataStatus"); }   // data already loaded stays
   ev.target.value = "";
 });
 
-$("#csvClear").addEventListener("click", () => { S.csv = null; S.picked = new Set(); drawData(); schedule(); });
+$("#csvClear").addEventListener("click", () => {
+  S.csv = null; S.picked = new Set();
+  status("", "", "#dataStatus");
+  drawRows(); drawData(); schedule();
+});
 
 // ---------------------------------------------------------------------------
 // Printing
@@ -1394,7 +1425,7 @@ function drawPrintButton() {
 }
 $("#copies").addEventListener("input", drawPrintButton);
 
-// A status line: the print bar's, or another such as the templates' (#tplStatus)
+// A status line: the print bar's, or the templates' (#tplStatus) or Data panel's (#dataStatus)
 function status(msg, cls = "", where = "#printStatus") {
   const s = $(where);
   s.textContent = msg;

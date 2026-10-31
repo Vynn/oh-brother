@@ -39,7 +39,7 @@ def send(host, port, data, timeout=10):
 
 
 def check(host, port, timeout=3):
-    """True if something accepts TCP connections at host:port."""
+    """(ok, message): whether something accepts TCP connections at host:port."""
     try:
         with socket.create_connection((host, int(port)), timeout=timeout):
             return True, "Printer reachable"

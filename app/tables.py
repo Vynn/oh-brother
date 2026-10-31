@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 import zlib
 
-MAX_XML = 64 * 1024 * 1024   # largest unpacked sheet we'll parse
+MAX_XML = 64 * 1024 * 1024   # largest unpacked part of a spreadsheet we'll parse
 
 NS = {
     "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
@@ -169,7 +169,9 @@ def _ods_rows(root):
     if sheet is None:
         raise TableError("The spreadsheet has no sheets")
     rows = []
-    # Rows may sit inside header-row or row-group wrappers
+    # Rows may sit inside header-row or row-group wrappers. A repeated row
+    # with content (table:number-rows-repeated) is read once: LibreOffice
+    # writes duplicate rows out one by one, so only empty runs are repeated.
     for row in sheet.iter(q("table:table-row")):
         cells, gap = [], 0
         for c in row:

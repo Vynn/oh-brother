@@ -1,4 +1,5 @@
-"""Flask backend. Stateless apart from config and templates in the data folder."""
+"""Flask backend. Its only state is the config and templates in the data
+folder, and the count of open editor pages."""
 
 import io
 import json
@@ -282,7 +283,7 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
                 return jsonify(error=f"Send failed: {e}"), 502
         return jsonify(labels=len(images), bytes=len(job), warnings=warnings, dry_run=dry_run)
 
-    # ---- CSV ---------------------------------------------------------------
+    # ---- data files --------------------------------------------------------
 
     @app.post("/api/csv")
     def parse_csv():
@@ -302,6 +303,8 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         return jsonify(headers=headers, rows=records)
 
     # ---- templates ---------------------------------------------------------
+    # Names are matched as paths, so one with a slash reaches tpl_path() and is
+    # refused with its reason rather than a bare "not found".
 
     @app.get("/api/templates")
     def list_templates():
@@ -317,8 +320,6 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     def get_sample(name):
         return read_tpl(tpl_path(name, sample_dir))
 
-    # Names are matched as paths so one with a slash reaches tpl_path and is
-    # refused with its reason, not a bare "not found"
     @app.put("/api/templates/<path:name>")
     def put_template(name):
         path, data = tpl_path(name), body()   # checked before the file is opened, which empties it

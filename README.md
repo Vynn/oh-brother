@@ -2,7 +2,7 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.3.2 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.3.3 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
 
 ![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
@@ -48,7 +48,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid (0.02 in when using inches). Hold Alt to place freely.
   - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
   - Arrow keys nudge the selection (Shift for bigger steps). Delete removes it.
-  - Text size 0 shrinks the text to fit its box.
+  - Text size 0 shrinks the text to fit its box, up to *Max size* if one is set. *Line spacing* sets the gap between lines: 1 is normal, 1.5 is half as much again.
   - While you type in a text field, its element is outlined on the label and tagged *Editing*. Double-click an element on the label to jump to its text.
 - **Several elements:** Shift- or Ctrl-click to add or remove one, drag across empty space to select every element the rectangle touches, or press Ctrl+A. Drag any of them to move them together.
   - Align them to each other (Selection) or to the printable area (Label).

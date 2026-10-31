@@ -2,6 +2,26 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.3.3 · 2026-10-31
+
+Quicker large data files, more text options, and comments brought up to date.
+
+### Added
+
+- Text has *Max size* and *Line spacing*. Max size limits how large shrink-to-fit text grows, and is off while a size is set. Line spacing sets the gap between lines: 1 is normal. Both could already be set in a template file, but not in the editor.
+
+### Fixed
+
+- With large data files, every click on a row or tick of its box rebuilt the whole rows table: about 0.7 s per click at 5,000 rows. The table is now built once, when the data loads, and clicks and ticks update it in place.
+- A data file that couldn't be loaded reported in the print bar. The message now shows beside *Load data…*.
+- Changing the label's size or direction rounded element positions to 0.1 mm, which could move a snapped centre off by up to 0.05 mm. Positions now keep 0.01 mm, as everywhere else.
+
+### Changed
+
+- Barcodes are listed as *Barcode* in the elements list, as on the add button and in the properties panel. They were listed as *Code*.
+- The `hidden` element option is gone. Nothing in the editor set it.
+- Code comments are checked against the code and brought up to date, and the developer notes now cover the inch grid and every header the preview sends.
+
 ## 0.3.2 · 2026-10-31
 
 Safer template saving, tidier separators, UTF-16 data, and launcher fixes.

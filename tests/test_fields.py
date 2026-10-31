@@ -29,7 +29,7 @@ class Fill(unittest.TestCase):
         self.assertEqual(render.fill("{{sku}}", rec, False, chain={"SKU"}), "P-42")
 
     def test_unchained_values_are_used_as_written(self):
-        # CSV cells are never expanded
+        # Data cells are never expanded
         rec = {"sku": "P-{{item}}", "item": "42"}
         self.assertEqual(render.fill("{{sku}}", rec, False), "P-{{item}}")
 

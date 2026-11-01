@@ -30,6 +30,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Saving asks before replacing a template, separators tidied beside empty fields, and UTF-16 data (shipped in 0.3.2)
 - [x] Large data files that stay quick to click through, and a maximum size and line spacing for text (shipped in 0.3.3)
 - [x] Faster printing on two-colour tape, and tests for drawing, printing and starting the app (shipped in 0.3.4)
+- [x] Exact package versions, tests on four platforms on every change, and labels laid out the same on every computer (shipped in 0.3.5)
 
 ## Under consideration
 
@@ -37,4 +38,4 @@ Not scheduled yet.
 
 - Click-to-launch: a Quit button, a single running instance, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
 - Windows: a `run.bat` launcher and a Windows runtime
-- Tested runtimes for ARM Linux and macOS
+- ARM Linux and macOS tried in real use (CI has built and tested them since 0.3.5)

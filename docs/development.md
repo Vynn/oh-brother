@@ -53,7 +53,7 @@ UPDATE_REFERENCES=1 sh test.sh
 
 When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
 
-The editor in `app/static/` has no tests yet; it would need a browser to drive it.
+The editor in `app/static/` has no tests yet; it would need a browser to drive it. What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
 
 ## Continuous integration
 

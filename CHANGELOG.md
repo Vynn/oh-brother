@@ -2,6 +2,26 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.3.5 · 2026-11-01
+
+Exact package versions, tests on four platforms, and labels laid out the same on every computer.
+
+### Added
+
+- Continuous integration on GitHub Actions. Every push to `main`, version tag and pull request builds the app from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. When output differs from a reference, the differing images or print jobs are attached to the run.
+- A monthly run with the newest version of every package, so an upstream release that would break the app shows up before the versions are raised.
+- A [printer checklist](docs/printer-checklist.md) for what only a real printer can show, to go through before a release that changes printing.
+
+### Fixed
+
+- Text came out slightly differently on different computers. Pillow lays text out with Raqm when the computer has the FriBiDi library, and otherwise with its basic layout, which moved some glyphs by a dot. Text now always uses the basic layout, so a template prints the same everywhere. The first macOS test run found this.
+- On macOS, the port check could let the app share a port another program was listening on, so with `--lan` the app's own window could open the other program. This came in with 0.3.2, and the first macOS test run found it.
+
+### Changed
+
+- Every package is pinned to an exact version, dependencies included, so every build of a version gets the same app.
+- Right-to-left text, and scripts whose letters change shape or join, such as Arabic, Hebrew or Devanagari, aren't laid out correctly. Before, Pillow could shape them on computers that had FriBiDi.
+
 ## 0.3.4 · 2026-10-31
 
 Faster printing on two-colour tape, and a fuller test suite.

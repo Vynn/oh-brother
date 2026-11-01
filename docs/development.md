@@ -65,7 +65,7 @@ The workflows can only read the repository and use no secrets. They use only Git
 
 ## How printing works
 
-`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields.
+`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields. Text uses Pillow's basic layout, which relies only on the FreeType bundled with Pillow, so a label comes out the same on every computer. Pillow's other layout, Raqm, would use the computer's own FriBiDi library if it had one, and moved some glyphs by a dot. The basic layout doesn't shape right-to-left or other complex scripts, such as Arabic or Devanagari.
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
@@ -77,7 +77,7 @@ Each editor page holds `GET /api/alive` open: an event stream the server writes 
 
 On Linux, the launcher reads the default browser from `xdg-settings` and its command from the `.desktop` file, and passes `--new-window` for browsers known to accept it (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar). Anything else goes to `xdg-open`, which usually opens a tab, and so does a `.desktop` file that can't be read or whose command can't be parsed.
 
-The launcher uses the first free port from `--port`, testing it on the address the server will listen on: all interfaces with `--lan`, otherwise `127.0.0.1`. The test sets `SO_REUSEADDR`, as the server does, so connections from the last run, which take about a minute to close, don't make the port look taken. Moving to another port would lose the editor's saved layout, units and open categories, which the browser keeps per address. With `--lan` it also prints this machine's network address, found by connecting a UDP socket to an address reserved for documentation. Connecting a UDP socket sends nothing.
+The launcher uses the first free port from `--port`, testing it on the address the server will listen on: all interfaces with `--lan`, otherwise `127.0.0.1`. The test sets `SO_REUSEADDR`, as the server does, so connections from the last run, which take about a minute to close, don't make the port look taken. With it, macOS would also let the app share a port another program is listening on, so a port that anything answers on at `127.0.0.1` counts as taken. Moving to another port would lose the editor's saved layout, units and open categories, which the browser keeps per address. With `--lan` it also prints this machine's network address, found by connecting a UDP socket to an address reserved for documentation. Connecting a UDP socket sends nothing.
 
 ## Requests from other sites
 

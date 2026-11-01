@@ -1,0 +1,64 @@
+# Build the portable folder and run the tests on each platform the app is
+# built for. Runs on pushes to main, version tags and pull requests, and by
+# hand from the Actions tab. upstream.yml runs these same steps once a month
+# with the newest version of every package.
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      newest:
+        description: Use the newest version of every package, not the pinned ones
+        type: boolean
+        default: false
+
+# Read the code; nothing else. No secrets are used.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false   # finish every platform, so one failure doesn't hide another
+      matrix:
+        include:
+          - { name: Linux x86_64, os: ubuntu-24.04 }
+          - { name: Linux ARM, os: ubuntu-24.04-arm }
+          - { name: macOS Apple Silicon, os: macos-15 }
+          - { name: macOS Intel, os: macos-15-intel }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      # GitHub's own actions, pinned to the commit of a release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Use the newest version of every package
+        if: inputs.newest
+        run: sed -i.pinned -E 's/==.*$//' requirements.txt requirements-binary.txt
+
+      - name: Build
+        run: sh build.sh
+
+      - name: Package versions
+        run: ls vendor/*/ | grep dist-info | sed 's/\.dist-info$//'
+
+      - name: Test
+        run: sh test.sh -v
+        env:
+          TMPDIR: ${{ runner.temp }}   # where a test saves output that differs from its reference
+
+      - name: Keep output that differs from a reference
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
+        with:
+          name: differences-${{ matrix.os }}
+          path: ${{ runner.temp }}/oh-brother-tests
+          if-no-files-found: ignore

@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 
-VERSION = "0.3.4"
+VERSION = "0.3.5"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)
@@ -24,9 +24,23 @@ GRACE_S = 10   # stop this long after the last page closes (covers reloads)
 NEW_WINDOW = ("firefox", "librewolf", "chrome", "chromium", "brave", "edge", "vivaldi", "opera")
 
 
+def in_use(port):
+    """True if something on this machine already answers on the port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
 def free_port(start, host):
     """The first port from `start` that is free on `host`, the address the server will use."""
     for port in range(start, start + 50):
+        # macOS, unlike Linux, lets a socket with SO_REUSEADDR (below) share a
+        # port another program listens on, and connections to 127.0.0.1 then
+        # reach that program. So a port anything answers on counts as taken.
+        if in_use(port):
+            continue
         with socket.socket() as s:
             # As the server does: otherwise connections from the last run, closing
             # for about a minute, make the port look taken, and the app moves to

@@ -12,6 +12,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
 | `docs/images/` | Screenshots for the README | Yes |
+| `.github/workflows/` | Continuous integration on GitHub Actions | Yes |
 | `runtime/<platform>/` | Standalone Python | No, built |
 | `vendor/common/` | Pure-Python packages, shared by all platforms | No, built |
 | `vendor/<platform>/` | Compiled packages (Pillow) | No, built |
@@ -24,7 +25,7 @@ sh build.sh
 sh run.sh
 ```
 
-`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled).
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app. To move to newer versions, change the pins, rebuild and run the tests.
 
 `.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
 
@@ -52,11 +53,19 @@ UPDATE_REFERENCES=1 sh test.sh
 
 When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
 
-The editor in `app/static/` has no tests yet; it would need a browser to drive it.
+The editor in `app/static/` has no tests yet; it would need a browser to drive it. What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
+
+## Continuous integration
+
+GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
+
+`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones, so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
+
+The workflows can only read the repository and use no secrets. They use only GitHub's own actions, pinned to the commit of a release. The privacy check that runs before each commit stays local: its pattern is itself personal.
 
 ## How printing works
 
-`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields.
+`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields. Text uses Pillow's basic layout, which relies only on the FreeType bundled with Pillow, so a label comes out the same on every computer. Pillow's other layout, Raqm, would use the computer's own FriBiDi library if it had one, and moved some glyphs by a dot. The basic layout doesn't shape right-to-left or other complex scripts, such as Arabic or Devanagari.
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
@@ -68,7 +77,7 @@ Each editor page holds `GET /api/alive` open: an event stream the server writes 
 
 On Linux, the launcher reads the default browser from `xdg-settings` and its command from the `.desktop` file, and passes `--new-window` for browsers known to accept it (Firefox, Chrome, Chromium, Brave, Edge, Vivaldi and similar). Anything else goes to `xdg-open`, which usually opens a tab, and so does a `.desktop` file that can't be read or whose command can't be parsed.
 
-The launcher uses the first free port from `--port`, testing it on the address the server will listen on: all interfaces with `--lan`, otherwise `127.0.0.1`. The test sets `SO_REUSEADDR`, as the server does, so connections from the last run, which take about a minute to close, don't make the port look taken. Moving to another port would lose the editor's saved layout, units and open categories, which the browser keeps per address. With `--lan` it also prints this machine's network address, found by connecting a UDP socket to an address reserved for documentation. Connecting a UDP socket sends nothing.
+The launcher uses the first free port from `--port`, testing it on the address the server will listen on: all interfaces with `--lan`, otherwise `127.0.0.1`. The test sets `SO_REUSEADDR`, as the server does, so connections from the last run, which take about a minute to close, don't make the port look taken. With it, macOS would also let the app share a port another program is listening on, so a port that anything answers on at `127.0.0.1` counts as taken. Moving to another port would lose the editor's saved layout, units and open categories, which the browser keeps per address. With `--lan` it also prints this machine's network address, found by connecting a UDP socket to an address reserved for documentation. Connecting a UDP socket sends nothing.
 
 ## Requests from other sites
 

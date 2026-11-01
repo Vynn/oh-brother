@@ -76,7 +76,7 @@ HOSTPY="$HERE/runtime/$HOST/python/bin/python3"
 echo "vendor/common: installing packages"
 rm -rf "$HERE/vendor/common"
 "$HOSTPY" -m pip install --quiet --disable-pip-version-check \
-    --target "$HERE/vendor/common" -r "$HERE/requirements.txt"
+    --target "$HERE/vendor/common" -r "$HERE/requirements.txt" -c "$HERE/requirements-binary.txt"
 ( cd "$HERE/vendor/common" && rm -rf PIL [Pp]illow* bin docs tests __pycache__ )
 
 for plat in $TARGETS; do

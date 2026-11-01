@@ -2,7 +2,7 @@
 
 Label printing for a network Brother QL-820NWB, in black or in black and red. It's a local web app that runs from its own folder, with nothing installed on the host, so it can live on a thumbdrive.
 
-> **Status: pre-release.** Version 0.3.4 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
+> **Status: pre-release.** Version 0.3.5 is the current build. Anything may change. See the [roadmap](ROADMAP.md) and [changelog](CHANGELOG.md).
 
 ![The Oh-Brother editor: a red and black bin label previewed from row 3 of a parts CSV, with the field mapping and rows below it and the selected element's properties on the right](docs/images/editor-csv.png)
 
@@ -10,7 +10,7 @@ Label printing for a network Brother QL-820NWB, in black or in black and red. It
 
 - A Brother QL-820NWB on the network. Other two-colour QL models (QL-800, QL-810W) are selectable but untested.
 - For red: DK-2251 tape (62 mm, black and red), also sold as the DK-22513 3-pack.
-- Linux on x86_64. Other platforms: see the [roadmap](ROADMAP.md).
+- Linux on x86_64. Builds for ARM Linux and macOS pass the tests on every change, but haven't been tried in real use: see the [roadmap](ROADMAP.md).
 
 ## Run
 
@@ -49,6 +49,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
   - Arrow keys nudge the selection (Shift for bigger steps). Delete removes it.
   - Text size 0 shrinks the text to fit its box, up to *Max size* if one is set. *Line spacing* sets the gap between lines: 1 is normal, 1.5 is half as much again.
+  - Text is laid out the same on every computer. Right-to-left text, and scripts whose letters change shape or join, such as Arabic, Hebrew or Devanagari, aren't laid out correctly.
   - While you type in a text field, its element is outlined on the label and tagged *Editing*. Double-click an element on the label to jump to its text.
 - **Several elements:** Shift- or Ctrl-click to add or remove one, drag across empty space to select every element the rectangle touches, or press Ctrl+A. Drag any of them to move them together.
   - Align them to each other (Selection) or to the printable area (Label).
@@ -78,7 +79,7 @@ The preview is exactly what prints. Over the network the printer doesn't report 
 
 ## Development
 
-See [development](docs/development.md) for the folder layout, how printing works, and third-party code.
+See [development](docs/development.md) for the folder layout, how printing works, tests and CI, and third-party code. Before a release that changes printing, go through the [printer checklist](docs/printer-checklist.md).
 
 ## License
 

@@ -38,7 +38,13 @@ def mm(v):
 
 def _font(family, bold, px):
     files = FONT_FILES.get(family, FONT_FILES["sans"])
-    return ImageFont.truetype(os.path.join(FONT_DIR, files[1 if bold else 0]), max(1, int(px)))
+    # Pillow's basic layout, which uses only the FreeType bundled with Pillow.
+    # Its other layout, Raqm, needs the computer's own FriBiDi library, so text
+    # came out a dot different on computers without it (as on macOS). Labels
+    # are now the same on every computer; right-to-left and other scripts that
+    # need shaping, such as Arabic or Devanagari, aren't laid out correctly.
+    return ImageFont.truetype(os.path.join(FONT_DIR, files[1 if bold else 0]), max(1, int(px)),
+                              layout_engine=ImageFont.Layout.BASIC)
 
 
 def _wrap(text, font, width, wrap):

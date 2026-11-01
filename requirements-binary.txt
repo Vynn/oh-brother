@@ -1,1 +1,4 @@
-pillow>=10,<13
+# Compiled packages, installed per platform into vendor/<platform>. Also used
+# as a constraint for vendor/common, so the Pillow brother-ql asks for there
+# (and build.sh then removes) is this same version.
+pillow==12.3.0

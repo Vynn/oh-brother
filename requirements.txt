@@ -1,4 +1,18 @@
+# Pure-Python packages, installed once into vendor/common for every platform.
+# Exact versions, so every build of a commit gets the same app; their own
+# dependencies are pinned below them. Pillow is in requirements-binary.txt.
 brother-ql-inventree==1.3
-flask>=3.0
-qrcode>=7.4
-python-barcode>=0.15
+flask==3.1.3
+python-barcode==0.16.1
+qrcode==8.2
+
+# What the packages above depend on
+attrs==26.1.0
+blinker==1.9.0
+click==8.5.0
+itsdangerous==2.2.0
+jinja2==3.1.6
+markupsafe==3.0.4
+packbits==0.6
+pyusb==1.3.1
+werkzeug==3.1.9

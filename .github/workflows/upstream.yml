@@ -1,0 +1,20 @@
+# Once a month, build and test with the newest version of every package
+# instead of the pinned ones, so an upstream release that would break the app
+# shows up here before the pins are raised. Also runs by hand from the Actions
+# tab. GitHub runs schedules only from the default branch, and turns them off
+# in a public repository after 60 days without activity.
+name: Upstream versions
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"   # 06:00 UTC on the 1st of each month
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  newest:
+    uses: ./.github/workflows/tests.yml
+    with:
+      newest: true

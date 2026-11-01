@@ -12,6 +12,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
 | `docs/images/` | Screenshots for the README | Yes |
+| `.github/workflows/` | Continuous integration on GitHub Actions | Yes |
 | `runtime/<platform>/` | Standalone Python | No, built |
 | `vendor/common/` | Pure-Python packages, shared by all platforms | No, built |
 | `vendor/<platform>/` | Compiled packages (Pillow) | No, built |
@@ -24,7 +25,7 @@ sh build.sh
 sh run.sh
 ```
 
-`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled).
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app. To move to newer versions, change the pins, rebuild and run the tests.
 
 `.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
 
@@ -53,6 +54,14 @@ UPDATE_REFERENCES=1 sh test.sh
 When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
 
 The editor in `app/static/` has no tests yet; it would need a browser to drive it.
+
+## Continuous integration
+
+GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
+
+`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones, so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
+
+The workflows can only read the repository and use no secrets. They use only GitHub's own actions, pinned to the commit of a release. The privacy check that runs before each commit stays local: its pattern is itself personal.
 
 ## How printing works
 

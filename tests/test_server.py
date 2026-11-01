@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 from urllib.parse import quote, unquote
 
+import fields
 import printer
 import render
 import server
@@ -53,6 +54,9 @@ class Config(ApiTest):
         self.assertEqual(meta["config"], server.DEFAULT_CONFIG)
         self.assertIn("QL-820NWB", meta["models"])
         self.assertIn("62red", [t["id"] for t in meta["tapes"]])
+        # The editor finds fields with the server's own pattern and built-ins
+        self.assertEqual(meta["field_pattern"], fields.PLACEHOLDER.pattern)
+        self.assertEqual(meta["builtin_fields"], ["date", "time", "datetime"])
 
     def test_only_known_settings_are_saved(self):
         cfg = self.post("/api/config", {"printer_host": "192.168.1.50", "other": 1}).get_json()["config"]
@@ -140,7 +144,7 @@ class Print(ApiTest):
 class DataFiles(ApiTest):
 
     def upload(self, name, raw):
-        return self.client.post("/api/csv", data={"file": (io.BytesIO(raw), name)},
+        return self.client.post("/api/data", data={"file": (io.BytesIO(raw), name)},
                                 content_type="multipart/form-data")
 
     def test_rows_and_headers(self):
@@ -148,7 +152,7 @@ class DataFiles(ApiTest):
         self.assertEqual(out, {"headers": ["code", "Column 2"], "rows": [{"code": "A1", "Column 2": "Bolt"}]})
 
     def test_no_file(self):
-        self.assertEqual(self.client.post("/api/csv").status_code, 400)
+        self.assertEqual(self.client.post("/api/data").status_code, 400)
 
     def test_empty_file(self):
         self.assertEqual(self.upload("empty.csv", b"").get_json(), {"error": "The file has no rows"})
@@ -299,7 +303,7 @@ class Errors(ApiTest):
         self.assertEqual(print_(copies="3").get_json()["labels"], 3)
 
     def test_unexpected_errors_are_json_and_logged(self):
-        with mock.patch.object(server.render, "tape_list", side_effect=RuntimeError("boom")), \
+        with mock.patch.object(server.tapes, "tape_list", side_effect=RuntimeError("boom")), \
                 self.assertLogs(self.app.logger, "ERROR"):
             resp = self.client.get("/api/meta")
         self.assertJsonError(resp, 500, "Server error: boom")
@@ -317,10 +321,34 @@ class ShippedSamples(unittest.TestCase):
             tpl = json.load(f)
         with open(os.path.join(server.SAMPLES, "parts.csv"), "rb") as f:
             headers = tables.read_table("parts.csv", f.read())[0]
-        fields = render.placeholders(tpl["layout"])
-        self.assertEqual(sorted(fields), sorted(headers))
-        self.assertEqual(fields, [f.lower() for f in fields])   # lowercase, the house style
-        self.assertEqual(tpl["mapping"], {f: f for f in fields})
+        names = fields.placeholders(tpl["layout"])
+        self.assertEqual(sorted(names), sorted(headers))
+        self.assertEqual(names, [f.lower() for f in names])   # lowercase, the house style
+        self.assertEqual(tpl["mapping"], {f: f for f in names})
+
+
+class Pages(ApiTest):
+
+    def test_editor_and_its_files(self):
+        with self.client.get("/") as page:   # files are sent open: close them
+            self.assertEqual((page.status_code, page.mimetype), (200, "text/html"))
+            self.assertIn(b'src="/static/app.js"', page.data)
+        for path in ("/static/app.js", "/static/style.css"):
+            with self.subTest(path), self.client.get(path) as resp:
+                self.assertEqual(resp.status_code, 200)
+
+    def test_nothing_outside_the_static_folder(self):
+        for path in ("/static/../server.py", "/static/%2e%2e/server.py", "/static/missing.js"):
+            with self.subTest(path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+
+    def test_open_page_is_counted_until_it_closes(self):
+        stream = self.client.get("/api/alive", buffered=False)
+        self.assertEqual(stream.mimetype, "text/event-stream")
+        self.assertEqual(next(iter(stream.response)), b"retry: 2000\n\n")
+        self.assertEqual(self.app.presence.count, 1)
+        stream.close()   # as when the page closes
+        self.assertEqual(self.app.presence.count, 0)
 
 
 class Presence(unittest.TestCase):

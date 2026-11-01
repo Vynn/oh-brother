@@ -1,13 +1,19 @@
-"""The launcher's helpers in main.py: finding the browser and a free port."""
+"""The launcher: main.py's helpers for the browser and the port, and run.sh
+started as a user starts it."""
 
+import json
 import os
+import signal
 import socket
 import subprocess
 import tempfile
+import time
 import unittest
+import urllib.request
 from unittest import mock
 
 import main
+from . import ROOT
 
 
 class BrowserCommand(unittest.TestCase):
@@ -65,3 +71,34 @@ class Ports(unittest.TestCase):
     def test_lan_address(self):
         ip = main.lan_address()
         self.assertTrue(ip is None or socket.inet_aton(ip))
+
+
+class Startup(unittest.TestCase):
+    """sh run.sh, on a free port with a temporary data folder."""
+
+    def test_starts_answers_and_stops_with_ctrl_c(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        data = os.path.join(tmp.name, "data")
+        port = main.free_port(8700, "127.0.0.1")
+        proc = subprocess.Popen(["sh", os.path.join(ROOT, "run.sh"), "--no-browser", "--port", str(port),
+                                 "--data", data], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(proc.kill)   # in case a check below fails first
+        # Straight to this machine, whatever proxy the environment names
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                with opener.open(f"http://127.0.0.1:{port}/api/meta", timeout=1) as resp:
+                    meta = json.load(resp)
+                break
+            except OSError:
+                if proc.poll() is not None or time.monotonic() > deadline:
+                    self.fail("The app didn't start: " + (proc.communicate(timeout=5)[0] if proc.poll() is not None else "timed out"))
+                time.sleep(0.1)
+        self.assertIn("QL-820NWB", meta["models"])
+        proc.send_signal(signal.SIGINT)   # Ctrl+C; run.sh has exec'd Python, so it gets it directly
+        out = proc.communicate(timeout=10)[0]
+        self.assertEqual(proc.returncode, 0, out)
+        self.assertIn(f"running at http://127.0.0.1:{port}/", out)
+        self.assertTrue(os.path.isdir(os.path.join(data, "templates")))

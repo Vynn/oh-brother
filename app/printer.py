@@ -7,22 +7,44 @@ to port 9100 instead.
 
 import socket
 
+import brother_ql.conversion
 from brother_ql.conversion import convert
+from brother_ql.labels import FormFactor
 from brother_ql.raster import BrotherQLRaster
+from PIL import Image, ImageChops
 
 import render
+import tapes
+
+
+def _filtered_hsv(im, filter_h, filter_s, filter_v, default_col=(255, 255, 255)):
+    """brother_ql's colour filter for two-colour tape, without its per-pixel loop.
+
+    brother_ql picks out red and black by testing each pixel's hue, saturation
+    and value in Python, about 50 ms a label. Multiplying the three 0/255 masks
+    gives the same mask in Pillow, so the job is byte for byte the same. Its
+    loop also uses Image.getdata, which Pillow 14 removes.
+    """
+    h, s, v = im.convert("HSV").split()
+    mask = ImageChops.multiply(ImageChops.multiply(h.point(filter_h), s.point(filter_s)), v.point(filter_v))
+    out = Image.new("RGB", im.size, color=default_col)
+    out.paste(im, None, mask)
+    return out
+
+
+brother_ql.conversion.filtered_hsv = _filtered_hsv   # convert() looks it up there
 
 
 def build_job(layout, images, model, cut=True):
     """Convert rendered canvases into one raster job (bytes)."""
-    tape = render._label(layout.get("tape", "62red"))
+    tape = tapes.label(layout.get("tape", "62red"))
     qlr = BrotherQLRaster(model)
     qlr.exception_on_warning = True
     return convert(
         qlr=qlr,
         images=[render.print_image(layout, im) for im in images],
         label=tape.identifier,
-        rotate="0" if tape.form_factor == render.FormFactor.ENDLESS else "auto",
+        rotate="0" if tape.form_factor == FormFactor.ENDLESS else "auto",
         threshold=50,
         dither=False,
         compress=False,

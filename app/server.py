@@ -12,9 +12,11 @@ from urllib.parse import quote, urlsplit
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, InternalServerError
 
+import fields
 import printer
 import render
 import tables
+import tapes
 
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Sample templates and data, shipped with the app and read-only. The data
@@ -154,7 +156,7 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         # asking, but JSON only after a CORS check this server never answers.
         # So anything with a body must be JSON. The data upload is a form, but
         # it only reads the file and changes nothing.
-        if request.method in ("POST", "PUT", "PATCH") and request.endpoint != "parse_csv" \
+        if request.method in ("POST", "PUT", "PATCH") and request.endpoint != "read_data" \
                 and not request.is_json:
             abort(415, "Requests must be sent as JSON")
 
@@ -204,8 +206,10 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     @app.get("/api/meta")
     def meta():
         cfg = load_config()
-        return jsonify(config=cfg, models=MODELS, tapes=render.tape_list(cfg["model"]),
-                       fonts=list(render.FONT_FILES), dpmm=render.DPMM)
+        # The field tag pattern and built-in fields, so the editor finds fields as the server does
+        return jsonify(config=cfg, models=MODELS, tapes=tapes.tape_list(cfg["model"]),
+                       fonts=list(render.FONT_FILES), dpmm=tapes.DPMM,
+                       field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS))
 
     @app.post("/api/config")
     def save_config():
@@ -243,7 +247,7 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         return Response(buf.getvalue(), mimetype="image/png", headers={
             "Cache-Control": "no-store",
             "X-Warnings": quote(json.dumps(warnings)),
-            "X-Placeholders": quote(json.dumps(render.placeholders(layout))),
+            "X-Placeholders": quote(json.dumps(fields.placeholders(layout))),
             "X-Blank": quote(json.dumps(blank)),
         })
 
@@ -285,9 +289,9 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
 
     # ---- data files --------------------------------------------------------
 
-    @app.post("/api/csv")
-    def parse_csv():
-        # Any supported table file, despite the name: see tables.py
+    @app.post("/api/data")
+    def read_data():
+        # Any data file tables.py reads: CSV, TSV, spreadsheets or JSON
         f = request.files.get("file")
         if not f:
             return jsonify(error="No file"), 400

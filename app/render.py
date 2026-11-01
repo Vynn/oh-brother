@@ -6,21 +6,19 @@ exact bitmap sent to the printer.
 
 Everything is drawn without anti-aliasing and in pure black (0,0,0) or pure
 red (255,0,0), so brother_ql's black/red separation is unambiguous and the
-preview shows exactly what the thermal head will produce.
+preview shows exactly what the thermal head will produce. Tape sizes come from
+tapes.py and field filling from fields.py.
 """
 
-import datetime
 import os
-import re
 
 from PIL import Image, ImageDraw, ImageFont
 
 import barcode as pybarcode
 import qrcode
-from brother_ql.labels import ALL_LABELS, FormFactor
 
-DPI = 300
-DPMM = DPI / 25.4
+from fields import fill, fill_text
+from tapes import DPI, DPMM, canvas_dots, label
 
 COLORS = {"black": (0, 0, 0), "red": (255, 0, 0), "white": (255, 255, 255)}
 
@@ -33,188 +31,6 @@ FONT_FILES = {
     "mono": ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf"),
 }
 
-PLACEHOLDER = re.compile(r"\{\{\s*([^{}]+?)\s*\}\}")
-
-
-# --------------------------------------------------------------------------
-# Tapes
-# --------------------------------------------------------------------------
-
-def tape_list(model="QL-820NWB"):
-    """Labels usable on the given model (P-touch tapes excluded)."""
-    out = []
-    for lbl in ALL_LABELS:
-        if lbl.form_factor == FormFactor.PTOUCH_ENDLESS:
-            continue
-        if lbl.restricted_to_models and model not in lbl.restricted_to_models:
-            continue
-        endless = lbl.form_factor == FormFactor.ENDLESS
-        w, h = lbl.tape_size
-        if endless:
-            name = f"{w} mm continuous" + (" · black/red" if lbl.color else "")
-        elif lbl.form_factor == FormFactor.ROUND_DIE_CUT:
-            name = f"{w} mm round die-cut"
-        else:
-            name = f"{w} × {h} mm die-cut"
-        out.append({
-            "id": lbl.identifier,
-            "name": name,
-            "endless": endless,
-            "red": bool(lbl.color),
-            "round": lbl.form_factor == FormFactor.ROUND_DIE_CUT,
-            "dots": list(lbl.dots_printable),
-            "printable_mm": [round(d / DPMM, 1) for d in lbl.dots_printable],
-            # Physical (cut) size; height 0 = continuous. The printer feeds
-            # feed_mm of blank tape before and after a continuous label.
-            "tape_mm": list(lbl.tape_size),
-            "feed_mm": round(lbl.feed_margin / DPMM, 2) if endless else 0,
-        })
-    # Two-colour tape first, then continuous, then die-cut
-    out.sort(key=lambda t: (not t["red"], not t["endless"], t["dots"][0], t["dots"][1]))
-    return out
-
-
-def _label(tape_id):
-    for lbl in ALL_LABELS:
-        if lbl.identifier == tape_id:
-            return lbl
-    raise ValueError(f"unknown tape: {tape_id}")
-
-
-def canvas_dots(layout):
-    """Canvas size in dots as designed (before any print rotation)."""
-    lbl = _label(layout.get("tape", "62red"))
-    w, h = lbl.dots_printable
-    if lbl.form_factor == FormFactor.ENDLESS:
-        h = max(1, round(float(layout.get("length_mm", 50)) * DPMM))
-    if layout.get("orientation") == "landscape":
-        w, h = h, w
-    return w, h
-
-
-# --------------------------------------------------------------------------
-# Placeholders
-# --------------------------------------------------------------------------
-
-def placeholders(layout):
-    """Unique placeholder names used anywhere in the layout, in order.
-
-    Names are case-insensitive: each is listed once, as first spelled.
-    """
-    seen, keys = [], set()
-    for el in layout.get("elements", []):
-        for key in ("text", "data"):
-            for m in PLACEHOLDER.finditer(str(el.get(key, ""))):
-                if m.group(1).lower() not in keys:
-                    keys.add(m.group(1).lower())
-                    seen.append(m.group(1))
-    return seen
-
-
-def fill(template, record, keep_missing, chain=(), warnings=None):
-    """Replace {{Name}} with the record's value, or else a built-in date or time.
-
-    Values of the fields named in `chain` (fixed text typed by the user) may
-    themselves contain {{Name}} and are filled in turn. Other values (CSV
-    cells) are used exactly as they are. Empty fields fill as nothing. A
-    field that refers back to itself, directly or through others, is reported
-    and, with keep_missing (the preview), left as its tag.
-    Names are case-insensitive: {{Code}}, {{code}} and {{CODE}} are one field.
-    """
-    # Later keys win, so the record's fields override same-named CSV columns
-    record = {str(k).lower(): v for k, v in record.items()}
-    chain = {str(c).lower() for c in chain}
-    now = datetime.datetime.now()
-    builtins = {"date": now.strftime("%Y-%m-%d"), "time": now.strftime("%H:%M"),
-                "datetime": now.strftime("%Y-%m-%d %H:%M")}
-
-    def expand(text, path):
-        def sub(m):
-            key = m.group(1).lower()
-            if key in path:
-                if warnings is not None:
-                    msg = "Fields refer to each other in a loop: " + " → ".join(
-                        "{{%s}}" % k for k in path[path.index(key):] + (key,))
-                    if msg not in warnings:
-                        warnings.append(msg)
-                return m.group(0) if keep_missing else ""
-            if key in record and record[key] not in (None, ""):
-                v = str(record[key])
-                return expand(v, path + (key,)) if key in chain else v
-            if key in builtins:
-                return builtins[key]
-            return ""
-
-        return PLACEHOLDER.sub(sub, text)
-
-    return expand(str(template), ())
-
-
-EMPTY = "\x00"   # marks where an empty field was, while tidying a line
-# Punctuation typed between fields. Beside an empty field, one is dropped so
-# none is left doubled or dangling. Brackets and colons aren't separators.
-SEPARATORS = "·,;/|-–—"
-_SEP = "([%s])?" % re.escape(SEPARATORS)
-_AROUND_EMPTY = re.compile(r"( *)%s( *)\x00( *)%s( *)" % (_SEP, _SEP))
-
-
-def _tidy_empty(m):
-    """Replacement for one empty field, the spaces beside it, and a separator.
-
-    "A · _ · B" keeps one separator, "A · _" and "_ · B" lose theirs, and
-    "A _ · B" keeps it for B. A separator with nothing before it starts the
-    line ("- _ Bolt") and stays.
-    """
-    ls, lsep, lsp, rsp, rsep, rs = (g or "" for g in m.groups())
-    before, after = m.start() > 0, m.end() < len(m.string)
-    if lsep and rsep:
-        return ls + lsep + rs
-    if lsep:
-        return "" if before and not after else ls + lsep + lsp
-    if rsep:
-        return rsp + rsep + rs if before else ""
-    return " " if ls and rsp else ""   # a single space stays between words
-
-
-def fill_text(template, record, keep_missing, chain=(), warnings=None):
-    """Fill a text element. Returns (text, hide).
-
-    Tidies up after empty fields: spaces beside one are dropped (a single
-    space stays between words on both sides), so is a separator it would
-    leave doubled or dangling (see _tidy_empty), and a line that had fields
-    but is left blank is removed. Lines typed blank stay. `hide` is true when
-    the text has fields and all of them are empty, so fixed text around them
-    (a "SKU" label, an inverted bar) isn't drawn on its own.
-    """
-    has_field = filled = False
-    lines = []
-    for line in str(template).split("\n"):
-        if not PLACEHOLDER.search(line):
-            lines.append(line)
-            continue
-        has_field = True
-
-        def one(m):
-            nonlocal filled
-            v = fill(m.group(0), record, keep_missing, chain, warnings)
-            filled = filled or v != ""
-            return v if v != "" else EMPTY
-
-        out = PLACEHOLDER.sub(one, line)
-        # One empty field at a time, left to right, so each sees the line as
-        # the one before left it: "A · _ · _ · B" becomes "A · B"
-        while EMPTY in out:
-            out = _AROUND_EMPTY.sub(_tidy_empty, out, count=1)
-        if out.strip():
-            lines.append(out)
-    if has_field and not filled:
-        return "", True
-    return "\n".join(lines), False
-
-
-# --------------------------------------------------------------------------
-# Rendering
-# --------------------------------------------------------------------------
 
 def mm(v):
     return round(float(v) * DPMM)
@@ -372,7 +188,7 @@ def render(layout, record=None, keep_missing=True, chain=()):
     """
     record = record or {}
     warnings, blank = [], []
-    tape = _label(layout.get("tape", "62red"))
+    tape = label(layout.get("tape", "62red"))
     red_ok = bool(tape.color)
     W, H = canvas_dots(layout)
     img = Image.new("RGB", (W, H), COLORS["white"])

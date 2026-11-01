@@ -6,8 +6,8 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
-| `tests/` | Server-side tests | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
+| `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
@@ -36,13 +36,31 @@ sh test.sh
 
 The tests use Python's built-in `unittest`, so they run on the bundled runtime with nothing more to install. Options go to `unittest`: `sh test.sh -v` lists each test, and `sh test.sh -k cut` runs the tests whose names contain `cut`.
 
-They cover the server side: filling fields, reading data files, the API, run against a temporary data folder, and the launcher's port and browser helpers. Spreadsheets are built in memory. Printing is a dry run, so nothing is sent to a printer. The editor in `app/static/` has no tests yet; it would need a browser to drive it.
+They cover the server side, against a temporary data folder:
+
+- **Fields and data files:** filling and tidying fields, and reading every data format. Spreadsheets are built in memory.
+- **Drawing:** every element type and option, the size warnings, and canvas sizes. Ten layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along.
+- **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer.
+- **The API:** requests from other sites, errors, templates, the editor's page and files, and the stream that counts open pages.
+- **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.
+
+After an intended change to what's drawn or printed, rewrite the reference files, then look at the new images before committing them:
+
+```sh
+UPDATE_REFERENCES=1 sh test.sh
+```
+
+When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
+
+The editor in `app/static/` has no tests yet; it would need a browser to drive it.
 
 ## How printing works
 
-`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print.
+`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields.
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
+
+`printer.py` converts the images with brother_ql into raster commands, splitting the red and black layers for two-colour tape. brother_ql picks out red and black by testing each pixel in Python, which takes about 50 ms a label, so `printer.py` swaps in `_filtered_hsv()`, which builds the same masks with Pillow. The jobs are byte for byte the same, and a test compares the two. The job goes to port 9100 with a plain socket write. brother_ql's own network backend isn't used: it connects without a timeout, and it can't read status back over the network anyway.
 
 ## Launching and stopping
 
@@ -63,9 +81,8 @@ Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the edit
 
 ## Data files
 
-`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is still `POST /api/csv`.
+`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is `POST /api/data`.
 
-`printer.py` converts the image with brother_ql into raster commands, splitting the red and black layers for two-colour tape. It sends them with a plain socket write to port 9100. brother_ql's own network backend is not used: it connects without a timeout, and it can't read status back over the network anyway.
 
 ## Editor geometry
 
@@ -81,11 +98,13 @@ Snapping works in millimetres. Targets are the printable area's edges and centre
 
 ## Fields
 
-The browser builds one record per label. A record holds the CSV row's columns, if a CSV is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.
+The browser builds one record per label. A record holds the data row's columns, if data is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.
 
-`render.fill()` replaces each `{{name}}` (names are case-insensitive). A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while CSV cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path. Other empty fields fill as nothing in both.
+`fields.fill()` replaces each `{{name}}` (names are case-insensitive). A value is expanded again only if its field is in `chain`, so text typed by the user can refer to other fields and columns, while data cells are used exactly as written. Each expansion carries the path of fields it came through. A field already on the path is a loop: the preview keeps its tag, print leaves it blank, and a warning names the path. Other empty fields fill as nothing in both.
 
-Text elements go through `render.fill_text()`, which fills each line field by field and tidies up after empty ones. Spaces beside an empty field are dropped, leaving one space only when there was space on both sides. A separator beside it (`render.SEPARATORS`: `·` `,` `;` `/` `|` and dashes) goes too when it would be left doubled or dangling. Between two separators one stays, a separator at either end of what's left goes, and a separator starting the line, such as a list dash, stays. Empty fields are tidied one at a time, left to right, so a run of them leaves a single separator. A line that had fields and is left blank is removed. When a text element has fields and all are empty, it isn't drawn, and it's listed in `X-Blank` like an empty code so the editor can mark it. Print doesn't warn about these, since hiding them is intended.
+Text elements go through `fields.fill_text()`, which fills each line field by field and tidies up after empty ones. Spaces beside an empty field are dropped, leaving one space only when there was space on both sides. A separator beside it (`fields.SEPARATORS`: `·` `,` `;` `/` `|` and dashes) goes too when it would be left doubled or dangling. Between two separators one stays, a separator at either end of what's left goes, and a separator starting the line, such as a list dash, stays. Empty fields are tidied one at a time, left to right, so a run of them leaves a single separator. A line that had fields and is left blank is removed. When a text element has fields and all are empty, it isn't drawn, and it's listed in `X-Blank` like an empty code so the editor can mark it. Print doesn't warn about these, since hiding them is intended.
+
+The editor finds fields with the server's own tag pattern and list of built-in fields, sent in `/api/meta`, so the two always agree on what counts as a field.
 
 ## Templates
 

@@ -29,6 +29,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Sample templates kept apart from your own, requests from other sites refused, and a test suite (shipped in 0.3.1)
 - [x] Saving asks before replacing a template, separators tidied beside empty fields, and UTF-16 data (shipped in 0.3.2)
 - [x] Large data files that stay quick to click through, and a maximum size and line spacing for text (shipped in 0.3.3)
+- [x] Faster printing on two-colour tape, and tests for drawing, printing and starting the app (shipped in 0.3.4)
 
 ## Under consideration
 

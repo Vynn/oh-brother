@@ -1,43 +1,43 @@
-"""Field filling: render.fill(), render.fill_text() and render.placeholders()."""
+"""Field filling: fields.fill(), fields.fill_text() and fields.placeholders()."""
 
 import unittest
 
-import render
+import fields
 
 
 class Fill(unittest.TestCase):
 
     def test_names_ignore_case(self):
-        self.assertEqual(render.fill("{{Code}}/{{CODE}}", {"code": "A1"}, False), "A1/A1")
-        self.assertEqual(render.fill("{{code}}", {"Code": "A1"}, False), "A1")
+        self.assertEqual(fields.fill("{{Code}}/{{CODE}}", {"code": "A1"}, False), "A1/A1")
+        self.assertEqual(fields.fill("{{code}}", {"Code": "A1"}, False), "A1")
 
     def test_builtins(self):
-        self.assertRegex(render.fill("{{Date}}", {}, False), r"^\d{4}-\d\d-\d\d$")
-        self.assertRegex(render.fill("{{time}}", {}, False), r"^\d\d:\d\d$")
-        self.assertRegex(render.fill("{{datetime}}", {}, False), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
+        self.assertRegex(fields.fill("{{Date}}", {}, False), r"^\d{4}-\d\d-\d\d$")
+        self.assertRegex(fields.fill("{{time}}", {}, False), r"^\d\d:\d\d$")
+        self.assertRegex(fields.fill("{{datetime}}", {}, False), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
 
     def test_record_overrides_builtin(self):
-        self.assertEqual(render.fill("{{date}}", {"Date": "soon"}, False), "soon")
+        self.assertEqual(fields.fill("{{date}}", {"Date": "soon"}, False), "soon")
 
     def test_empty_and_missing_fields_fill_as_nothing(self):
         for keep in (True, False):   # preview and print alike
             with self.subTest(keep_missing=keep):
-                self.assertEqual(render.fill("[{{a}}{{b}}]", {"a": ""}, keep), "[]")
+                self.assertEqual(fields.fill("[{{a}}{{b}}]", {"a": ""}, keep), "[]")
 
     def test_chained_fields_expand(self):
         rec = {"sku": "P-{{item}}", "item": "42"}
-        self.assertEqual(render.fill("{{sku}}", rec, False, chain={"SKU"}), "P-42")
+        self.assertEqual(fields.fill("{{sku}}", rec, False, chain={"SKU"}), "P-42")
 
     def test_unchained_values_are_used_as_written(self):
         # Data cells are never expanded
         rec = {"sku": "P-{{item}}", "item": "42"}
-        self.assertEqual(render.fill("{{sku}}", rec, False), "P-{{item}}")
+        self.assertEqual(fields.fill("{{sku}}", rec, False), "P-{{item}}")
 
     def test_loop_is_reported_once(self):
         rec = {"a": "x{{b}}", "b": "y{{a}}"}
         warnings = []
-        preview = render.fill("{{a}}", rec, True, chain={"a", "b"}, warnings=warnings)
-        printed = render.fill("{{a}}", rec, False, chain={"a", "b"}, warnings=warnings)
+        preview = fields.fill("{{a}}", rec, True, chain={"a", "b"}, warnings=warnings)
+        printed = fields.fill("{{a}}", rec, False, chain={"a", "b"}, warnings=warnings)
         self.assertEqual(preview, "xy{{a}}")   # the preview keeps the looping tag
         self.assertEqual(printed, "xy")
         self.assertEqual(warnings, ["Fields refer to each other in a loop: {{a}} → {{b}} → {{a}}"])
@@ -46,7 +46,7 @@ class Fill(unittest.TestCase):
 class FillText(unittest.TestCase):
 
     def fill(self, template, keep_missing=False, **record):
-        return render.fill_text(template, record, keep_missing)
+        return fields.fill_text(template, record, keep_missing)
 
     def test_all_fields_filled(self):
         self.assertEqual(self.fill("{{first}} {{last}}", first="Ada", last="Lovelace"),
@@ -105,4 +105,4 @@ class Placeholders(unittest.TestCase):
             {"type": "qr", "data": "{{Code}}"},
             {"type": "text", "text": "{{CODE}} {{date}}"},
         ]}
-        self.assertEqual(render.placeholders(layout), ["Title", "Code", "date"])
+        self.assertEqual(fields.placeholders(layout), ["Title", "Code", "date"])

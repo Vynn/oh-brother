@@ -90,10 +90,10 @@
     <div class="data">
       <div class="data-head">
         <h2>Data</h2>
-        <label class="file-btn" title="CSV, TSV, OpenDocument (.ods), Excel (.xlsx) or JSON">Load data…<input type="file" id="csvFile" accept=".csv,.tsv,.txt,.ods,.fods,.xlsx,.json,text/csv"></label>
-        <button type="button" class="link" id="csvClear" hidden>Clear data</button>
+        <label class="file-btn" title="CSV, TSV, OpenDocument (.ods), Excel (.xlsx) or JSON">Load data…<input type="file" id="dataFile" accept=".csv,.tsv,.txt,.ods,.fods,.xlsx,.json,text/csv"></label>
+        <button type="button" class="link" id="dataClear" hidden>Clear data</button>
         <span class="status data-status" id="dataStatus" role="status"></span>
-        <span class="hint" id="csvInfo">Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code></span>
+        <span class="hint" id="dataInfo">Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code></span>
       </div>
       <div class="data-body">
         <table class="fields" id="fields"></table>

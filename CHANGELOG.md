@@ -2,6 +2,21 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.3.4 · 2026-10-31
+
+Faster printing on two-colour tape, and a fuller test suite.
+
+### Added
+
+- Tests for drawing and printing. Ten layouts are compared pixel for pixel with reference images, and four print jobs byte for byte with reference jobs, so a change to what's drawn or sent shows up at once. A fake printer on this machine receives real print jobs and answers the printer test. Another test starts `run.sh`, asks it for a page, and stops it with Ctrl+C. After an intended change, `UPDATE_REFERENCES=1 sh test.sh` rewrites the reference files.
+
+### Changed
+
+- Printing on two-colour tape is about two and a half times as fast: 100 labels take about 2 s rather than 5.5 s. brother_ql separated red from black one pixel at a time; the app now does it with Pillow, and the print jobs are byte for byte the same. This also stops using `Image.getdata`, which Pillow 14 removes.
+- `render.py` is split: tape sizes are in `tapes.py` and field filling in `fields.py`.
+- The data endpoint is `POST /api/data`, not `/api/csv`, since it reads any data file.
+- The editor finds fields with the server's own tag pattern and built-in field names, sent in `/api/meta`, rather than a copy of them. Panels are redrawn by one function, and text defaults are defined once.
+
 ## 0.3.3 · 2026-10-31
 
 Quicker large data files, more text options, and comments brought up to date.

@@ -40,7 +40,7 @@ const S = {
   editing: -1,          // element whose text field has focus
   alignTo: "selection", // several selected: align to "selection" or "label"
   fixed: {},            // field key (lowercase) -> fixed text
-  csv: null,            // loaded data, from any data file: {headers, rows}
+  data: null,           // loaded data file: {headers, rows}
   mapping: {},          // field key (lowercase) -> column name ("" = fixed text)
   picked: new Set(),    // data rows ticked for printing
   cur: 0,               // data row shown in the preview
@@ -96,7 +96,7 @@ function stepHistory(d) {
   const n = S.layout.elements.length;
   S.pick = new Set([...S.pick].filter((i) => i < n));
   S.sel = S.pick.size === 1 ? [...S.pick][0] : -1;
-  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
+  drawAll(); schedule();
   drawUndo();
 }
 const undo = () => stepHistory(-1), redo = () => stepHistory(1);
@@ -125,7 +125,7 @@ document.addEventListener("keydown", (ev) => {
 const tape = () => S.meta.tapes.find((t) => t.id === S.layout.tape) || S.meta.tapes[0];
 const dpmm = () => S.meta.dpmm;
 
-// Canvas size in mm as designed (mirrors render.canvas_dots on the server)
+// Canvas size in mm as designed (mirrors tapes.canvas_dots on the server)
 function canvasMM() {
   const t = tape();
   let w = t.dots[0] / dpmm();
@@ -169,18 +169,22 @@ const snap = (v) => imperial() ? r2(Math.round(v / 0.508) * 0.508) : Math.round(
 // Element defaults & presets
 // ---------------------------------------------------------------------------
 
+// Text defaults, for new elements and quick layouts. The renderer has its own
+// for templates that leave a key out.
+const TEXT = { font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0 };
+
 function newElement(type) {
   const c = canvasMM();
   const base = { type, color: "black", x: 2, y: 2 };
   switch (type) {
-    case "text": return { ...base, w: r1(c.w - 4), h: r1(Math.min(12, c.h - 4)), text: "Text", font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0 };
+    case "text": return { ...base, ...TEXT, w: r1(c.w - 4), h: r1(Math.min(12, c.h - 4)), text: "Text" };
     case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{code}}", ec: "M" }; }
     case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", show_text: true };
     case "rect": return { ...base, w: r1(c.w - 4), h: 1, fill: true, stroke_mm: 0.5 };
   }
 }
 
-const T = (o) => ({ type: "text", color: "black", font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0, ...o });
+const T = (o) => ({ type: "text", color: "black", ...TEXT, ...o });
 
 // Quick layouts. make(W, H) builds the elements for a printable area of W x H
 // mm, picking an arrangement from its shape: "thin" labels (long strips, such
@@ -515,8 +519,9 @@ function presetThumb(p, W, H) {
 // Data records
 // ---------------------------------------------------------------------------
 
-const TAG = /\{\{\s*([^{}]+?)\s*\}\}/g;
-const BUILTIN = ["date", "time", "datetime"];
+// The {{field}} pattern and the built-in fields come from the server
+// (/api/meta), so the editor finds fields exactly as the server fills them
+const tags = (text) => text.matchAll(new RegExp(S.meta.field_pattern, "g"));
 
 // Field names are case-insensitive: {{Code}} and {{code}} are one field.
 // Values and column choices are stored under the lowercase key; the Data
@@ -535,19 +540,19 @@ function lowerKeys(obj) {
 }
 
 // A field takes fixed text unless data is loaded and it's mapped to a column
-const isFixed = (p) => !(S.csv && S.mapping[fkey(p)]);
+const isFixed = (p) => !(S.data && S.mapping[fkey(p)]);
 
 // The layout's fields, plus any field named inside a fixed value, so that
 // {{code}} = "{{item}}" gives Item a row even when the layout doesn't use it.
 // Data column names are left out: those come straight from the row.
 function fields() {
   const out = [...S.placeholders], keys = new Set(out.map(fkey));
-  const cols = new Set((S.csv?.headers || []).map(fkey));
+  const cols = new Set((S.data?.headers || []).map(fkey));
   for (let i = 0; i < out.length; i++) {
     if (!isFixed(out[i])) continue;
-    for (const m of (S.fixed[fkey(out[i])] || "").matchAll(TAG)) {
+    for (const m of tags(S.fixed[fkey(out[i])] || "")) {
       const k = fkey(m[1]);
-      if (!keys.has(k) && !BUILTIN.includes(k) && !cols.has(k)) { keys.add(k); out.push(m[1]); }
+      if (!keys.has(k) && !S.meta.builtin_fields.includes(k) && !cols.has(k)) { keys.add(k); out.push(m[1]); }
     }
   }
   return out;
@@ -566,14 +571,14 @@ function record(row) {
   return rec;
 }
 
-const previewRecord = () => record(S.csv ? S.csv.rows[S.cur] : null);
+const previewRecord = () => record(S.data ? S.data.rows[S.cur] : null);
 
 function autoMap() {
-  if (!S.csv) return;
+  if (!S.data) return;
   for (const p of fields()) {
     const m = S.mapping[fkey(p)];
-    if (m !== undefined && (m === "" || S.csv.headers.includes(m))) continue;
-    const hit = S.csv.headers.find((c) => fkey(c) === fkey(p));
+    if (m !== undefined && (m === "" || S.data.headers.includes(m))) continue;
+    const hit = S.data.headers.find((c) => fkey(c) === fkey(p));
     S.mapping[fkey(p)] = hit || "";
   }
 }
@@ -1180,6 +1185,12 @@ function drawSetup() {
   $("#units").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === units));
 }
 
+// Redraw every panel and the label, after the layout is replaced, reshaped or
+// shown in other units
+function drawAll() {
+  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit();
+}
+
 // Apply a label-shape change, scaling elements proportionally so the layout
 // still fits the new canvas (QR codes stay square).
 function reshape(change) {
@@ -1197,7 +1208,7 @@ function reshape(change) {
       }
     }
   }
-  drawSetup(); drawPresets(); drawList(); drawProps(); fit(); schedule();
+  drawAll(); schedule();
 }
 
 $("#tape").addEventListener("change", (ev) => reshape(() => { S.layout.tape = ev.target.value; }));
@@ -1209,7 +1220,7 @@ $("#units").addEventListener("click", (ev) => {
   if (!v || v === units) return;
   units = v;
   try { localStorage.setItem(UNITS, v); } catch {}
-  drawTapes(); drawSetup(); drawPresets(); drawList(); drawProps(); fit();
+  drawTapes(); drawAll();
 });
 $("#orientation").addEventListener("click", (ev) => {
   const v = ev.target.dataset.v;
@@ -1286,7 +1297,7 @@ async function loadTemplate(n, sample = false) {
   if (j.mapping) S.mapping = { ...S.mapping, ...lowerKeys(j.mapping) };
   $("#tplName").value = sample ? "" : n;   // so Save asks for a name, and can't overwrite one of yours
   S.sel = -1; S.pick = new Set();
-  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); fit(); schedule();
+  drawAll(); schedule();
 }
 
 // Saving over a template asks first. The server refuses (409) unless the
@@ -1324,9 +1335,9 @@ function drawData() {
     // A newly referenced field gets its own row once typing is done
     fixedIn.addEventListener("change", () => { if (fields().join("\u0000") !== ph.join("\u0000")) { autoMap(); drawData(); } });
     let src = null;
-    if (S.csv) {
+    if (S.data) {
       src = h("select", {}, h("option", { value: "" }, "— fixed text —"),
-        ...S.csv.headers.map((c) => h("option", { value: c }, c)));
+        ...S.data.headers.map((c) => h("option", { value: c }, c)));
       src.value = S.mapping[fkey(p)] ?? "";
       fixedIn.hidden = !!src.value;
       src.addEventListener("change", () => {
@@ -1338,9 +1349,9 @@ function drawData() {
   });
   $("#fields").replaceChildren(...(rows.length ? rows : [h("tr", { class: "none" }, h("td", {}, "No fields in this layout"))]));
 
-  $("#rowsWrap").hidden = !S.csv;
-  $("#csvClear").hidden = !S.csv;
-  if (!S.csv) $("#csvInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
+  $("#rowsWrap").hidden = !S.data;
+  $("#dataClear").hidden = !S.data;
+  if (!S.data) $("#dataInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
   drawPicked();
 }
 
@@ -1348,8 +1359,8 @@ function drawData() {
 // a second per 5,000 rows. Clicks and ticks update it in place.
 
 function drawRows() {
-  if (!S.csv) { $("#rows").replaceChildren(); return; }
-  const { headers, rows } = S.csv;
+  if (!S.data) { $("#rows").replaceChildren(); return; }
+  const { headers, rows } = S.data;
   const all = h("input", { type: "checkbox", title: "Select all", class: "all" });
   all.addEventListener("change", () => {
     S.picked = all.checked ? new Set(rows.map((_, i) => i)) : new Set();
@@ -1379,31 +1390,31 @@ function showRow(i) {
 
 // The selection count, the Select all box, and the print button
 function drawPicked() {
-  if (S.csv) {
-    const n = S.csv.rows.length, all = $("#rows .all");
-    $("#csvInfo").textContent = `${n} rows · ${S.picked.size} selected · click a row to preview it`;
+  if (S.data) {
+    const n = S.data.rows.length, all = $("#rows .all");
+    $("#dataInfo").textContent = `${n} rows · ${S.picked.size} selected · click a row to preview it`;
     if (all) { all.checked = S.picked.size === n; all.indeterminate = S.picked.size > 0 && S.picked.size < n; }
   }
   drawPrintButton();
 }
 
-$("#csvFile").addEventListener("change", async (ev) => {
+$("#dataFile").addEventListener("change", async (ev) => {
   const f = ev.target.files[0];
   if (!f) return;
   const fd = new FormData();
   fd.append("file", f);
   status("", "", "#dataStatus");
   try {
-    S.csv = await api("/api/csv", { method: "POST", body: fd });
-    S.picked = new Set(S.csv.rows.map((_, i) => i));
+    S.data = await api("/api/data", { method: "POST", body: fd });
+    S.picked = new Set(S.data.rows.map((_, i) => i));
     S.cur = 0;
     autoMap(); drawRows(); drawData(); schedule();
   } catch (e) { status(e.message, "err", "#dataStatus"); }   // data already loaded stays
   ev.target.value = "";
 });
 
-$("#csvClear").addEventListener("click", () => {
-  S.csv = null; S.picked = new Set();
+$("#dataClear").addEventListener("click", () => {
+  S.data = null; S.picked = new Set();
   status("", "", "#dataStatus");
   drawRows(); drawData(); schedule();
 });
@@ -1413,12 +1424,12 @@ $("#csvClear").addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 
 function jobRecords() {
-  if (!S.csv) return [record(null)];
-  return [...S.picked].sort((a, b) => a - b).map((i) => record(S.csv.rows[i]));
+  if (!S.data) return [record(null)];
+  return [...S.picked].sort((a, b) => a - b).map((i) => record(S.data.rows[i]));
 }
 
 function drawPrintButton() {
-  const n = (S.csv ? S.picked.size : 1) * Math.max(1, +$("#copies").value || 1);
+  const n = (S.data ? S.picked.size : 1) * Math.max(1, +$("#copies").value || 1);
   const b = $("#printBtn");
   b.textContent = n === 1 ? "Print 1 label" : `Print ${n} labels`;
   b.disabled = n === 0;
@@ -1507,9 +1518,7 @@ $("#cfgTest").addEventListener("click", async () => {
     const c = canvasMM();
     S.layout.elements = roundAll(PRESETS[2].make(c.w, c.h));
   }
-  drawSetup(); drawPresets(); drawList(); drawProps(); drawData(); drawPrinterChip();
-  drawTemplates();
-  fit(); schedule();
+  drawAll(); drawPrinterChip(); drawTemplates(); schedule();
   checkpoint();
   if (S.meta.config.printer_host) testPrinter();
   new ResizeObserver(fit).observe($("#stage"));

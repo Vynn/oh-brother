@@ -6,7 +6,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
@@ -87,6 +87,17 @@ The app has no login, so `server.py` checks every request in `guard()`:
 - **JSON only.** A page on another site can send a form or plain text to any address without asking, but it can send JSON only after a CORS check, which this server never answers. So every `POST` or `PUT` must be sent as JSON, or it's refused with 415. The one exception is the data upload, a form, which only reads the file and changes nothing.
 
 Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the editor shows. Unexpected errors are 500s, and their tracebacks go to the terminal.
+
+## Images from a web address
+
+`POST /api/image-url` fetches an image for the editor, which stores it in the template like a chosen file. The server fetches it because browsers don't let a page read images from most other sites (CORS). It's fetched once, when the address is entered, never at print time. With `--lan`, anyone on the network can ask for a fetch, so `remote.py` is careful about what it fetches and what it hands back:
+
+- **The address:** trimmed, at most 2048 characters, with no spaces or control characters. Only `http` and `https`, with a host, and with no user name or password.
+- **Where it points:** the host is looked up first, and this machine (`127.0.0.1`, `::1`, `0.0.0.0`) and link-local addresses (`169.254.0.0/16`, `fe80::/10`) are refused. So are multicast addresses. Each redirect, at most five, is checked the same way. Ordinary network addresses are allowed, for a logo on a NAS, say. A name whose answer changes between the check and the download could still get past, which is acceptable for a home tool.
+- **The download:** at most 10 MB, within 10 seconds, with no proxy.
+- **What comes back:** only an image. It must be a PNG, JPEG, WebP or GIF that Pillow can open, or XML whose root is `<svg>`; the type the site claims is ignored. Python's XML parser refuses entity bombs and fetches nothing, and the browser draws SVGs as images, so scripts in them don't run.
+
+The tests serve their images from a small web server on this machine, so they allow this machine's addresses while they run, and check separately that the app refuses them.
 
 ## Data files
 

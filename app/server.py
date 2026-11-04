@@ -14,6 +14,7 @@ from werkzeug.exceptions import HTTPException, InternalServerError
 
 import fields
 import printer
+import remote
 import render
 import tables
 import tapes
@@ -291,6 +292,16 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
             except OSError as e:
                 return jsonify(error=f"Send failed: {e}"), 502
         return jsonify(labels=len(images), bytes=len(job), warnings=warnings, dry_run=dry_run)
+
+    # ---- images from a web address ------------------------------------------
+
+    # Fetched here, not in the browser, which most sites don't allow; see remote.py
+    @app.post("/api/image-url")
+    def image_from_url():
+        try:
+            return jsonify(remote.fetch_image(body().get("url")))
+        except remote.FetchError as e:
+            return jsonify(error=str(e)), 400
 
     # ---- data files --------------------------------------------------------
 

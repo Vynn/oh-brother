@@ -176,7 +176,7 @@ const TEXT = { font: "sans", bold: false, size: 0, align: "left", valign: "middl
 
 // Image defaults. The image is kept in colour, ready for a two-colour mode
 // later; for now it prints in the element's one colour.
-const IMAGE = { src: "", name: "", mode: "threshold", threshold: 50, invert: false };
+const IMAGE = { src: "", name: "", url: "", mode: "threshold", threshold: 50, invert: false };   // url: where it was fetched from
 const imageOf = (e) => Object.fromEntries(Object.keys(IMAGE).map((k) => [k, e[k] ?? IMAGE[k]]));   // its image settings
 
 function newElement(type) {
@@ -1245,24 +1245,44 @@ function drawProps(light = false) {
 // The chosen image (shown in grey, as it prints for now), and a button to choose another
 function imagePicker(e) {
   const i = S.sel;
+  // A file, or one fetched from an address, shrunk to fit and stored in the layout
+  const use = async (file, more) => {
+    Object.assign(S.layout.elements[i], { src: await readImage(file), name: file.name, url: "", ...more });
+    S.glyph = imageOf(S.layout.elements[i]);
+    drawList(); drawProps(); schedule();
+  };
   const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/svg+xml" });
   input.addEventListener("change", async () => {
-    const f = input.files[0];
-    if (!f) return;
-    try {
-      Object.assign(S.layout.elements[i], { src: await readImage(f), name: f.name });
-      S.glyph = imageOf(S.layout.elements[i]);
-      drawList(); drawProps(); schedule();
-    } catch (err) { status(err.message, "err", "#imgStatus"); }
+    if (!input.files[0]) return;
+    try { await use(input.files[0]); } catch (err) { status(err.message, "err", "#imgStatus"); }
   });
+  // From a web address: the server fetches it once (browsers block most sites),
+  // and it's saved with the template like a chosen file
+  const addr = h("input", { type: "url", placeholder: "or an address: https://…", value: e.url || "", spellcheck: false,
+    maxlength: 2048, "aria-label": "Image address" });
+  const get = h("button", { type: "button" }, "Get");
+  const fetchIt = async () => {
+    const url = addr.value.trim();
+    if (!/^https?:\/\//i.test(url)) { status("Enter an address starting with http:// or https://", "err", "#imgStatus"); return; }
+    get.disabled = true;
+    status("Getting the image…", "", "#imgStatus");
+    try {
+      const j = await api("/api/image-url", { method: "POST", body: { url } });
+      const blob = await (await fetch(j.data)).blob();
+      await use(new File([blob], j.name, { type: blob.type }), { url: j.url });
+    } catch (err) { status(err.message, "err", "#imgStatus"); get.disabled = false; }
+  };
+  get.addEventListener("click", fetchIt);
+  addr.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); fetchIt(); } });
   return h("div", { class: "field" }, "Image",
     h("div", { class: "img-pick" },
       e.src ? h("img", { src: e.src, alt: "" }) : h("span", { class: "none" }, "None chosen"),
       h("div", {},
         h("label", { class: "file-btn" }, e.src ? "Replace…" : "Choose…", input),
-        // What it adds to a template
-        e.src && h("div", { class: "img-meta", title: e.name || null },
+        // What it adds to a template, and where it came from
+        e.src && h("div", { class: "img-meta", title: e.url || e.name || null },
           `${e.name || "Image"} · ${Math.max(1, Math.round(e.src.length / 1024))} KB`))),
+    h("div", { class: "inline img-url" }, addr, get),
     h("p", { class: "status img-status", id: "imgStatus", role: "status" }));
 }
 

@@ -72,6 +72,8 @@ The app stops by itself about 10 seconds after you close its last window or tab,
 
 ![Two elements dragged together, with a snap guide across the label, the align and distribute panel on the right, and a chained field, INS-{{size}}-5, printing as INS-M3-5](docs/images/multi-select.png)
 
+![The Layered shelf tag quick layout: a star image beside the category, the price in an outlined box with a note under it, then the product name and variant, with the Retail quick layouts on the left and the image's properties on the right](docs/images/layered-shelf-tag.png)
+
 The preview is exactly what prints. Over the network the printer doesn't report back, so "Sent" means the job reached it.
 
 **Red too light or uneven?** How dark red prints is a setting on the printer, not in the app. On the QL-820NWB it's under *Menu* → *Settings* → *Print Density (2 colors)* → *Color 2 (Red)*; Brother's Printer Setting Tool has it as *Print Density (Red)*. Raising it to +2 made red print evenly on the printer the app is tested with. Lines across solid red areas are a different problem, which [Brother's FAQ](https://support.brother.com/g/b/faqend.aspx?c=us&lang=en&prod=lpql820nwbeus&ftype3=100182&faqid=faqp00100315_000) fixes by turning or cleaning the roller.

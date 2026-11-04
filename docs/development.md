@@ -6,7 +6,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
@@ -87,6 +87,14 @@ The app has no login, so `server.py` checks every request in `guard()`:
 - **JSON only.** A page on another site can send a form or plain text to any address without asking, but it can send JSON only after a CORS check, which this server never answers. So every `POST` or `PUT` must be sent as JSON, or it's refused with 415. The one exception is the data upload, a form, which only reads the file and changes nothing.
 
 Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the editor shows. Unexpected errors are 500s, and their tracebacks go to the terminal.
+
+## Barcodes
+
+`barcodes.py` knows each barcode type: what it takes, its quiet zones (the blank margins scanners need), its guard bars, and where its digits go. python-barcode does the encoding. Module positions and quiet zones come from the GS1 specifications: EAN-13 needs 11 modules on the left and 7 on the right, EAN-8 7 each side, UPC-A 9, ITF-14 10 narrow bars, and Code 128 10 modules.
+
+Retail codes must be given in full, check digit included. python-barcode would quietly replace a wrong check digit, printing a valid code for a different product, so `barcodes.encode()` checks it first and refuses it with the right digit named. Requiring every digit also catches a leading zero that a spreadsheet dropped, which would otherwise read as a code without its check digit. python-barcode doesn't work out ITF-14's check digit, so it's checked here the same way.
+
+`render.py` sizes the bars to whole printer dots, with the quiet zones inside the element's box. It warns below 2 dots per module for any barcode, and below 3 (0.25 mm, about three quarters of the standard size) for retail codes, where checkout scanners start to struggle. The editor lists the types from `/api/meta`.
 
 ## Data files
 

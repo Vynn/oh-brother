@@ -12,6 +12,7 @@ from urllib.parse import quote, urlsplit
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, InternalServerError
 
+import barcodes
 import fields
 import printer
 import render
@@ -206,10 +207,12 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     @app.get("/api/meta")
     def meta():
         cfg = load_config()
-        # The field tag pattern and built-in fields, so the editor finds fields as the server does
+        # The field tag pattern and built-in fields, so the editor finds fields as the server
+        # does, and the barcode types with what each takes
         return jsonify(config=cfg, models=MODELS, tapes=tapes.tape_list(cfg["model"]),
                        fonts=list(render.FONT_FILES), dpmm=tapes.DPMM,
-                       field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS))
+                       field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS),
+                       barcodes=[{"id": k, "name": v.name, "hint": v.hint} for k, v in barcodes.KINDS.items()])
 
     @app.post("/api/config")
     def save_config():

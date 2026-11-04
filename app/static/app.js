@@ -179,7 +179,7 @@ function newElement(type) {
   switch (type) {
     case "text": return { ...base, ...TEXT, w: r1(c.w - 4), h: r1(Math.min(12, c.h - 4)), text: "Text" };
     case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{code}}", ec: "M" }; }
-    case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", show_text: true };
+    case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", symbology: "code128", show_text: true };
     case "rect": return { ...base, w: r1(c.w - 4), h: 1, fill: true, stroke_mm: 0.5 };
   }
 }
@@ -199,7 +199,7 @@ const T = (o) => ({ type: "text", color: "black", ...TEXT, ...o });
 const marginFor = (W, H) => Math.max(0.5, Math.min(2, Math.round(Math.min(W, H) * 0.14) / 2));
 const shapeOf = (W, H) => W / H >= 2.8 ? "thin" : H / W >= 1.4 ? "tall" : "normal";
 const QR = (o) => ({ type: "qr", color: "black", data: "{{code}}", ec: "M", ...o });
-const BAR = (o) => ({ type: "barcode", color: "black", data: "{{code}}", show_text: true, ...o });
+const BAR = (o) => ({ type: "barcode", color: "black", data: "{{code}}", symbology: "code128", show_text: true, ...o });
 
 const RULE = (o) => ({ type: "rect", color: "black", fill: true, stroke_mm: 0.3, ...o });
 
@@ -967,7 +967,10 @@ $("#overlay").addEventListener("dblclick", (ev) => {
 // ---------------------------------------------------------------------------
 
 const KIND = { text: "Text", qr: "QR", barcode: "Barcode", rect: "Box" };
-const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h) : e.data;
+// A barcode type's name and what it takes, from the server (/api/meta)
+const barcodeKind = (e) => S.meta.barcodes.find((k) => k.id === (e.symbology || "code128")) || S.meta.barcodes[0];
+const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h)
+  : e.type === "barcode" && (e.symbology || "code128") !== "code128" ? `${barcodeKind(e).name} · ${e.data}` : e.data;
 
 // Selection: S.pick is the set of selected indexes; S.sel is the one shown in
 // the properties panel when exactly one is selected (otherwise -1)
@@ -1121,8 +1124,15 @@ function drawProps(light = false) {
 
   if (e.type === "text") {
     kids.push(fld("Text", editing(bind("text", h("textarea", { rows: 3, spellcheck: false })))));
-  } else if (e.type === "qr" || e.type === "barcode") {
-    kids.push(fld(e.type === "qr" ? "Data" : "Data (Code 128)", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
+  } else if (e.type === "qr") {
+    kids.push(fld("Data", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
+  } else if (e.type === "barcode") {
+    const hint = h("div", { class: "sub", style: "margin:-6px 0 10px" }, barcodeKind(e).hint);
+    const type = h("select", {}, ...S.meta.barcodes.map((k) => h("option", { value: k.id }, k.name)));
+    type.value = barcodeKind(e).id;
+    type.addEventListener("change", () => { e.symbology = type.value; hint.textContent = barcodeKind(e).hint; drawList(); schedule(); });
+    kids.push(fld("Type", type));
+    kids.push(fld("Data", editing(bind("data", h("input", { type: "text", spellcheck: false })))), hint);
   }
 
   kids.push(h("div", { class: "row4 num4" },

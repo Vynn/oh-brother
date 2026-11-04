@@ -183,7 +183,7 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 | itsdangerous | 2.2.0 | BSD-3-Clause |
 | click | 8.5.0 | BSD-3-Clause |
 | blinker | 1.9.0 | MIT |
-| Pillow | 12.3.0 | MIT-CMU |
+| Pillow | 13.0.0 | MIT-CMU |
 | qrcode | 8.2 | BSD |
 | python-barcode | 0.16.1 | MIT |
 | packbits | 0.6 | MIT |

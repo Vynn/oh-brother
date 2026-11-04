@@ -74,6 +74,8 @@ The app stops by itself about 10 seconds after you close its last window or tab,
 
 The preview is exactly what prints. Over the network the printer doesn't report back, so "Sent" means the job reached it.
 
+**Red too light or uneven?** How dark red prints is a setting on the printer, not in the app. On the QL-820NWB it's under *Menu* → *Settings* → *Print Density (2 colors)* → *Color 2 (Red)*; Brother's Printer Setting Tool has it as *Print Density (Red)*. Raising it to +2 made red print evenly on the printer the app is tested with. Lines across solid red areas are a different problem, which [Brother's FAQ](https://support.brother.com/g/b/faqend.aspx?c=us&lang=en&prod=lpql820nwbeus&ftype3=100182&faqid=faqp00100315_000) fixes by turning or cleaning the roller.
+
 ## Thumbdrives
 
 - Start the app with `sh run.sh` rather than `./run.sh`, since FAT32 and exFAT don't keep the executable flag.

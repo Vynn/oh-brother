@@ -18,6 +18,7 @@ Note anything that fails, with a photo of the label, before releasing.
 
 - [ ] Open *Sample: Bin label*, load `samples/parts.csv`, tick three rows, and print. Three labels come out, each with its own item, location and code.
 - [ ] The location prints red and the item and QR code black. Red and black line up, with no red specks in black areas or the other way round.
+- [ ] Red is even and as dark from one label to the next. If it's light or uneven, raise *Print Density (Red)* on the printer (*Menu* → *Settings* → *Print Density (2 colors)* → *Color 2 (Red)*); +2 fixed it on the test printer. Note the setting used with the results.
 - [ ] The QR code scans with a phone and gives the row's code, such as `BLT-M3-10`.
 - [ ] With *Cut each label* on, each label is cut off. With it off, nothing is cut, and the labels come out as one strip.
 - [ ] Two copies of one row give two identical labels.

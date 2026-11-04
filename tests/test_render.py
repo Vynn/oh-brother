@@ -2,7 +2,11 @@
 tapes.py, and reference images of every element type and option on the main
 kinds of tape."""
 
+import base64
+import io
 import unittest
+
+from PIL import Image, ImageDraw
 
 import render
 import tapes
@@ -27,12 +31,43 @@ def box(x, y, w, h, **o):
     return {"type": "rect", "x": x, "y": y, "w": w, "h": h, **o}
 
 
+def image(x, y, w, h, src, **o):
+    return {"type": "image", "x": x, "y": y, "w": w, "h": h, "src": src, "color": "black",
+            "mode": "threshold", "threshold": 50, "invert": False, **o}
+
+
+def data_url(img, fmt="PNG"):
+    buf = io.BytesIO()
+    img.save(buf, fmt)
+    return f"data:image/{fmt.lower()};base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def glyph(size=240):
+    """A plain test glyph: a dark disc crossed by a white band, on transparency."""
+    im = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    d.ellipse((size * 0.05, size * 0.05, size * 0.95, size * 0.95), fill=(20, 20, 20, 255))
+    d.rectangle((0, size * 0.42, size, size * 0.58), fill=(255, 255, 255, 255))
+    return data_url(im)
+
+
+def gradient(w=300, h=60):
+    """Black to white, left to right."""
+    im = Image.new("L", (w, h))
+    im.putdata([round(x * 255 / (w - 1)) for _ in range(h) for x in range(w)])
+    return data_url(im)
+
+
+GLYPH, GRADIENT = glyph(), gradient()
+
+
 def layout(*elements, tape="62red", length=30, orientation="portrait"):
     return {"tape": tape, "length_mm": length, "orientation": orientation, "elements": list(elements)}
 
 
 RECORD = {"title": "Bolt M3 × 12", "body": "Zinc plated, box of 100", "code": "B-0012",
-          "name": "Ada", "street": "", "city": "Paris"}
+          "name": "Ada", "street": "", "city": "Paris",
+          "category": "Hardware", "variant": "Box of 100", "price": "$4.50", "note": "Bulk price"}
 
 # One layout per reference image. Fixed text only: no {{date}} or {{time}}.
 REFERENCES = {
@@ -73,6 +108,24 @@ REFERENCES = {
         text(1, 8, 58, 6, "SKU {{missing}}"),   # every field empty: hidden
         text(1, 15, 58, 6, "{{title}}\n{{missing}}\nend", size=5),
         length=22),
+    # The Layered shelf tag quick layout's arrangement, on 62 mm tape, 25 mm long
+    "layered-shelf-tag": layout(
+        image(2, 2.74, 7.39, 7.39, GLYPH),
+        text(10.39, 3.78, 22.13, 5.32, "{{category}}", wrap=False),
+        box(35.13, 2, 21.8, 9.24, fill=False, stroke_mm=0.3),
+        text(35.87, 2.74, 20.32, 5.28, "{{price}}", align="center", wrap=False),
+        text(35.87, 8.02, 20.32, 2.48, "{{note}}", align="center", wrap=False),
+        text(2, 12.24, 54.93, 6.3, "{{title}}", wrap=False),
+        text(2, 18.54, 54.93, 4.46, "{{variant}}", wrap=False),
+        length=25),
+    "image-modes": layout(
+        image(1, 1, 56, 6, GRADIENT),                     # threshold at 50%: the darker half
+        image(1, 8, 56, 6, GRADIENT, threshold=80),       # more of it
+        image(1, 15, 56, 6, GRADIENT, mode="dither"),     # shading as dots
+        image(1, 22, 12, 12, GLYPH, invert=True),         # the box prints, the glyph stays blank
+        image(15, 22, 12, 12, GLYPH, color="red"),
+        image(29, 22, 28, 12, GLYPH),                     # wide box: centred, not stretched
+        length=35),
 }
 
 
@@ -137,6 +190,78 @@ class Elements(unittest.TestCase):
         img, warnings, blank = self.draw({"type": "sparkle", "x": 0, "y": 0, "w": 10, "h": 10})
         self.assertEqual(colours(img), {WHITE})
         self.assertEqual((warnings, blank), ([], []))
+
+
+class Images(unittest.TestCase):
+
+    def ink(self, el, **lay):
+        """Share of the element's box that prints, its colours, warnings and blanks."""
+        img, warnings, blank = render.render(layout(el, **lay))
+        dpmm = tapes.DPMM
+        box = img.crop((round(el["x"] * dpmm), round(el["y"] * dpmm),
+                        round((el["x"] + el["w"]) * dpmm), round((el["y"] + el["h"]) * dpmm)))
+        printed = sum(n for n, c in box.getcolors(1 << 20) if c != WHITE)
+        return printed / (box.width * box.height), colours(box), warnings, blank
+
+    def test_threshold_level(self):
+        # The gradient is 5:1, as is its box, so it fills the box
+        half = self.ink(image(0, 0, 50, 10, GRADIENT))[0]
+        more = self.ink(image(0, 0, 50, 10, GRADIENT, threshold=80))[0]
+        self.assertAlmostEqual(half, 0.5, delta=0.03)
+        self.assertAlmostEqual(more, 0.8, delta=0.03)
+
+    def test_dither_shows_grey_as_dots(self):
+        grey = data_url(Image.new("L", (50, 50), 128))
+        share, cols, _, _ = self.ink(image(0, 0, 20, 20, grey, mode="dither"))
+        self.assertAlmostEqual(share, 0.5, delta=0.05)
+        # Thresholded, grey 128 is all or nothing
+        self.assertEqual(self.ink(image(0, 0, 20, 20, grey, threshold=60))[0], 1.0)
+        self.assertEqual(self.ink(image(0, 0, 20, 20, grey, threshold=40))[0], 0)
+
+    def test_transparent_parts_print_nothing(self):
+        clear = data_url(Image.new("RGBA", (50, 50), (0, 0, 0, 0)))
+        self.assertEqual(self.ink(image(0, 0, 20, 20, clear))[0], 0)
+
+    def test_inverted_fills_the_box(self):
+        clear = data_url(Image.new("RGBA", (50, 50), (0, 0, 0, 0)))
+        self.assertEqual(self.ink(image(0, 0, 20, 20, clear, invert=True))[0], 1.0)
+
+    def test_fits_without_stretching(self):
+        # A square image in a box twice as wide: the side strips stay blank
+        black = data_url(Image.new("L", (50, 50), 0))
+        self.assertAlmostEqual(self.ink(image(0, 0, 40, 20, black))[0], 0.5, delta=0.01)
+
+    def test_prints_in_its_colour(self):
+        self.assertEqual(self.ink(image(0, 0, 20, 20, GLYPH, color="red"))[1], {RED, WHITE})
+        self.assertEqual(self.ink(image(0, 0, 20, 20, GLYPH, color="red"), tape="62")[1], {BLACK, WHITE})
+
+    def test_jpeg_and_webp(self):
+        for fmt in ("JPEG", "WEBP"):
+            with self.subTest(fmt):
+                src = data_url(Image.new("RGB", (50, 50), (0, 0, 0)), fmt)
+                self.assertEqual(self.ink(image(0, 0, 20, 20, src))[0], 1.0)
+
+    def test_low_resolution_warning(self):
+        tiny = data_url(Image.new("L", (8, 8), 0))
+        self.assertIn("Image is low resolution for its size on the label; it may print blocky",
+                      self.ink(image(0, 0, 20, 20, tiny))[2])
+
+    def test_missing_or_unusable(self):
+        big = data_url(Image.new("L", (2100, 2100), 0))
+        cases = {
+            "": ("empty", None),
+            "data:image/png;base64,AAAA": ("invalid", "it isn't a PNG, JPEG, WebP or GIF image"),
+            "data:image/png;base64,@@@@": ("invalid", "its data is damaged"),
+            "data:text/plain;base64,AAAA": ("invalid", "it isn't an image"),
+            big: ("invalid", "the image has too many pixels"),
+            "data:image/png;base64," + "A" * render.MAX_IMAGE_CHARS:
+                ("invalid", "it's over 128 KB; choose it again, and the editor will shrink it"),
+        }
+        for src, (why, msg) in cases.items():
+            with self.subTest(why=why, msg=msg):
+                share, _, warnings, blank = self.ink(image(0, 0, 20, 20, src))
+                self.assertEqual((share, blank), (0, [{"i": 0, "type": "image", "why": why}]))
+                self.assertEqual(warnings, [] if msg is None else [f"Image can't be used: {msg}"])
 
 
 class Canvas(unittest.TestCase):

@@ -6,7 +6,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`), web UI (`static/`), fonts | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
@@ -65,7 +65,7 @@ The workflows can only read the repository and use no secrets. They use only Git
 
 ## How printing works
 
-`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields. Text uses Pillow's basic layout, which relies only on the FreeType bundled with Pillow, so a label comes out the same on every computer. Pillow's other layout, Raqm, would use the computer's own FriBiDi library if it had one, and moved some glyphs by a dot. The basic layout doesn't shape right-to-left or other complex scripts, such as Arabic or Devanagari.
+`render.py` draws a layout (geometry in millimetres) to an RGB image at 300 dpi. It uses no anti-aliasing and only three colours: black, red and white. That one image is both the preview and the print. `tapes.py` gives each tape's size, and `fields.py` fills in the fields. Images arrive from the editor as data URLs, at most 600 px on the long side and 128 KB as stored (`render.MAX_IMAGE_CHARS`, sent to the editor in `/api/meta`), and are kept in colour so a two-colour mode can use them later. The editor tries PNG first, which keeps logos lossless, then WebP, which suits photos, then both at smaller sizes until the image fits; the server refuses anything larger. `render.py` composites one onto white, makes it greyscale, scales it to its box at print size, and then applies a threshold or Floyd–Steinberg dithering, so the conversion to dots happens at the printer's own resolution. Decoded images are cached, since the preview redraws on every drag frame. SVGs are drawn by the browser before they're stored, since Pillow can't read them. Text uses Pillow's basic layout, which relies only on the FreeType bundled with Pillow, so a label comes out the same on every computer. Pillow's other layout, Raqm, would use the computer's own FriBiDi library if it had one, and moved some glyphs by a dot. The basic layout doesn't shape right-to-left or other complex scripts, such as Arabic or Devanagari.
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
@@ -87,6 +87,17 @@ The app has no login, so `server.py` checks every request in `guard()`:
 - **JSON only.** A page on another site can send a form or plain text to any address without asking, but it can send JSON only after a CORS check, which this server never answers. So every `POST` or `PUT` must be sent as JSON, or it's refused with 415. The one exception is the data upload, a form, which only reads the file and changes nothing.
 
 Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the editor shows. Unexpected errors are 500s, and their tracebacks go to the terminal.
+
+## Images from a web address
+
+`POST /api/image-url` fetches an image for the editor, which stores it in the template like a chosen file. The server fetches it because browsers don't let a page read images from most other sites (CORS). It's fetched once, when the address is entered, never at print time. With `--lan`, anyone on the network can ask for a fetch, so `remote.py` is careful about what it fetches and what it hands back:
+
+- **The address:** trimmed, at most 2048 characters, with no spaces or control characters. Only `http` and `https`, with a host, and with no user name or password.
+- **Where it points:** the host is looked up first, and this machine (`127.0.0.1`, `::1`, `0.0.0.0`) and link-local addresses (`169.254.0.0/16`, `fe80::/10`) are refused. So are multicast addresses. Each redirect, at most five, is checked the same way. Ordinary network addresses are allowed, for a logo on a NAS, say. A name whose answer changes between the check and the download could still get past, which is acceptable for a home tool.
+- **The download:** at most 10 MB, within 10 seconds, with no proxy.
+- **What comes back:** only an image. It must be a PNG, JPEG, WebP or GIF that Pillow can open, or XML whose root is `<svg>`; the type the site claims is ignored. Python's XML parser refuses entity bombs and fetches nothing, and the browser draws SVGs as images, so scripts in them don't run.
+
+The tests serve their images from a small web server on this machine, so they allow this machine's addresses while they run, and check separately that the app refuses them.
 
 ## Data files
 

@@ -12,6 +12,7 @@ from urllib.parse import quote, urlsplit
 from flask import Flask, Response, abort, jsonify, request, send_from_directory
 from werkzeug.exceptions import HTTPException, InternalServerError
 
+import barcodes
 import fields
 import printer
 import remote
@@ -211,10 +212,12 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     def meta():
         cfg = load_config()
         # The field tag pattern and built-in fields, so the editor finds fields as the server
-        # does, and the most an image may take up, which the editor shrinks images to fit
+        # does, the barcode types with what each takes, and the most an image may
+        # take up, which the editor shrinks images to fit
         return jsonify(config=cfg, models=MODELS, tapes=tapes.tape_list(cfg["model"]),
                        fonts=list(render.FONT_FILES), dpmm=tapes.DPMM,
                        field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS),
+                       barcodes=[{"id": k, "name": v.name, "hint": v.hint} for k, v in barcodes.KINDS.items()],
                        image_budget=render.MAX_IMAGE_CHARS)
 
     @app.post("/api/config")

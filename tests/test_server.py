@@ -57,6 +57,7 @@ class Config(ApiTest):
         # The editor finds fields with the server's own pattern and built-ins
         self.assertEqual(meta["field_pattern"], fields.PLACEHOLDER.pattern)
         self.assertEqual(meta["builtin_fields"], ["date", "time", "datetime"])
+        self.assertEqual([b["id"] for b in meta["barcodes"]], ["code128", "ean13", "ean8", "upca", "itf14"])
         self.assertEqual(meta["image_budget"], 128 * 1024)   # the editor shrinks images to fit
 
     def test_only_known_settings_are_saved(self):

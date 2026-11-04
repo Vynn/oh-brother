@@ -18,9 +18,9 @@ import os
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-import barcode as pybarcode
 import qrcode
 
+import barcodes
 from fields import fill, fill_text
 from tapes import DPI, DPMM, canvas_dots, label
 
@@ -147,36 +147,72 @@ def _draw_qr(mask, el, data, warnings):
 
 
 def _draw_barcode(mask, el, data, warnings):
-    """Draw a barcode. Returns "empty" or "invalid" when nothing is drawn."""
+    """Draw a barcode. Returns "empty" or "invalid" when nothing is drawn.
+
+    The quiet zones, blank margins that scanners need, are kept inside the
+    box. Retail codes get their standard look: the digits in groups under
+    each half, with the guard bars running down between them. ITF-14 gets
+    bars along its top and bottom, as printed on cartons.
+    """
     W, H = mask.size
     if not data:
         return "empty"
     try:
-        # Code 128. A template may name another python-barcode type, but the
-        # editor offers only this one.
-        modules = pybarcode.get(el.get("symbology", "code128"), data).build()[0]
-    except Exception as e:
+        code = barcodes.encode(el.get("symbology", "code128"), data)
+    except barcodes.BarcodeError as e:
         warnings.append(f"Barcode error: {e}")
         return "invalid"
-    n = len(modules)
+    kind, modules = code.kind, code.modules
+    left, right = kind.quiet
+    n = left + len(modules) + right
     mod = W // n
-    if mod < 2:
-        warnings.append(f"Barcode too dense for its width ({n} modules); widen it or shorten the data")
-        mod = max(1, mod)
-    text_h = 0
+    msg = (f"Barcode too dense for its width ({len(modules)} modules); widen it or shorten the data" if mod < 2
+           else f"{kind.name} barcode is small for checkout scanners; widen it" if mod < kind.min_dots else None)
+    if msg and msg not in warnings:   # once, however many barcodes it applies to
+        warnings.append(msg)
+    mod = max(1, mod)
+    x0 = (W - n * mod) // 2 + left * mod   # where the bars start
     d = ImageDraw.Draw(mask)
     d.fontmode = "1"
+
+    text_h, font = 0, None
     if el.get("show_text", True):
-        font = _font("mono", False, max(12, H * 0.18))
-        a, desc = font.getmetrics()
-        text_h = a + desc
-        tw = font.getlength(data)
-        d.text(((W - tw) / 2, H - text_h), data, font=font, fill=255)
-    bar_h = max(1, H - text_h - (mm(0.5) if text_h else 0))
-    ox = (W - n * mod) // 2
+        px = max(12, H * (0.22 if kind.groups else 0.18))
+        # One size for every group, small enough that each fits under its bars
+        for a, b, m0, m1, scale in kind.groups:
+            w = _font("mono", False, px * scale).getlength(code.text[a:b])
+            if w > (m1 - m0) * mod * 0.92:
+                px *= (m1 - m0) * mod * 0.92 / w
+        font = _font("mono", False, max(8, px))
+        text_h = sum(font.getmetrics())
+    if kind.groups:
+        bar_end = H - text_h                       # the digits sit just below the bars
+        guard_end = H - round(text_h * 0.45)       # and the guards run down between them
+    else:
+        bar_end = guard_end = H - (text_h + mm(0.5) if text_h else 0)
+    bearer = max(2, 4 * mod) if kind.bearers else 0   # twice a narrow bar's width
+    top, bar_end, guard_end = bearer, bar_end - bearer, guard_end - bearer
+    guards = {i for a, b in kind.guards for i in range(a, b + 1)}
     for i, bit in enumerate(modules):
         if bit == "1":
-            d.rectangle([ox + i * mod, 0, ox + (i + 1) * mod - 1, bar_h - 1], fill=255)
+            end = guard_end if i in guards else bar_end
+            d.rectangle([x0 + i * mod, top, x0 + (i + 1) * mod - 1, max(top, end - 1)], fill=255)
+    if bearer:
+        sx0, sx1 = x0 - left * mod, x0 + (len(modules) + right) * mod - 1
+        d.rectangle([sx0, 0, sx1, bearer - 1], fill=255)
+        d.rectangle([sx0, bar_end, sx1, bar_end + bearer - 1], fill=255)
+
+    if font is None:
+        return None
+    if not kind.groups:
+        d.text(((W - font.getlength(code.text)) / 2, H - text_h), code.text, font=font, fill=255)
+        return None
+    for a, b, m0, m1, scale in kind.groups:
+        f = font if scale == 1 else _font("mono", False, font.size * scale)
+        txt = code.text[a:b]
+        gx = x0 + (m0 + m1) / 2 * mod - f.getlength(txt) / 2
+        d.text((round(gx), H - sum(f.getmetrics())), txt, font=f, fill=255)
+    return None
 
 
 # Images: the editor stores them as data URLs, in colour so that a two-colour

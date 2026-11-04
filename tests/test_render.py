@@ -126,6 +126,15 @@ REFERENCES = {
         image(15, 22, 12, 12, GLYPH, color="red"),
         image(29, 22, 28, 12, GLYPH),                     # wide box: centred, not stretched
         length=35),
+    "barcode-types": layout(
+        bar(1, 1, 38, 16, "4006381333931", symbology="ean13"),
+        bar(41, 1, 17, 16, "96385074", symbology="ean8"),
+        bar(1, 19, 38, 16, "036000291452", symbology="upca"),
+        bar(41, 19, 17, 16, "{{code}}", symbology="code128"),
+        bar(1, 37, 57, 16, "15400141288763", symbology="itf14"),
+        bar(1, 55, 28, 12, "4006381333931", symbology="ean13", show_text=False),
+        bar(31, 55, 27, 12, "978-3-16-148410-0", symbology="ean13", color="red"),
+        length=68),
 }
 
 

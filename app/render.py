@@ -10,9 +10,13 @@ preview shows exactly what the thermal head will produce. Tape sizes come from
 tapes.py and field filling from fields.py.
 """
 
+import base64
+import binascii
+import functools
+import io
 import os
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import qrcode
 
@@ -211,6 +215,73 @@ def _draw_barcode(mask, el, data, warnings):
     return None
 
 
+# Images: the editor stores them as data URLs, in colour so that a two-colour
+# mode can use them later; for now they print in one colour.
+IMAGE_FORMATS = ["PNG", "JPEG", "WEBP", "GIF"]
+MAX_IMAGE_CHARS = 128 * 1024   # the data URL, as stored in a template; the editor shrinks images to fit
+MAX_IMAGE_PIXELS = 2048 * 2048
+
+
+@functools.lru_cache(maxsize=8)   # the preview redraws on every drag frame
+def _load_image(src):
+    """A data URL's image, composited onto white and made greyscale ("L")."""
+    if len(src) > MAX_IMAGE_CHARS:
+        raise ValueError(f"it's over {MAX_IMAGE_CHARS // 1024} KB; choose it again, and the editor will shrink it")
+    head, _, data = src.partition(",")
+    if not head.startswith("data:image/") or not head.endswith(";base64"):
+        raise ValueError("it isn't an image")
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except binascii.Error:
+        raise ValueError("its data is damaged") from None
+    try:
+        with Image.open(io.BytesIO(raw), formats=IMAGE_FORMATS) as im:
+            if im.width * im.height > MAX_IMAGE_PIXELS:
+                raise ValueError("the image has too many pixels")
+            rgba = im.convert("RGBA")
+    except Image.DecompressionBombError:
+        raise ValueError("the image has too many pixels") from None
+    except OSError:   # includes Pillow's "cannot identify image file"
+        raise ValueError("it isn't a PNG, JPEG, WebP or GIF image") from None
+    # Transparent parts become paper
+    return Image.alpha_composite(Image.new("RGBA", rgba.size, (255, 255, 255, 255)), rgba).convert("L")
+
+
+def _draw_image(mask, el, warnings):
+    """Draw an image in one colour. Returns "empty" or "invalid" when nothing is drawn.
+
+    The image is scaled to fit its box without stretching, centred, and made
+    black and white at print size: with a threshold (anything darker prints),
+    which keeps a logo's edges crisp, or by dithering, which shows shading as
+    a pattern of dots. Inverted, the box prints and the image's dark parts
+    stay blank, as inverted text does.
+    """
+    src = el.get("src") or ""
+    if not src:
+        return "empty"
+    try:
+        grey = _load_image(src)
+    except ValueError as e:
+        warnings.append(f"Image can't be used: {e}")
+        return "invalid"
+    W, H = mask.size
+    scale = min(W / grey.width, H / grey.height)
+    if scale > 3:
+        warnings.append("Image is low resolution for its size on the label; it may print blocky")
+    w, h = max(1, round(grey.width * scale)), max(1, round(grey.height * scale))
+    canvas = Image.new("L", (W, H), 255)
+    canvas.paste(grey.resize((w, h), Image.LANCZOS), ((W - w) // 2, (H - h) // 2))
+    if el.get("invert"):
+        canvas = ImageOps.invert(canvas)
+    if el.get("mode") == "dither":
+        ink = ImageOps.invert(canvas.convert("1").convert("L"))   # Pillow dithers (Floyd-Steinberg) by default
+    else:
+        level = max(1, min(99, float(el.get("threshold", 50)))) / 100 * 255
+        ink = canvas.point(lambda v: 255 if v < level else 0)
+    mask.paste(ink)
+    return None
+
+
 def _draw_rect(mask, el):
     W, H = mask.size
     d = ImageDraw.Draw(mask)
@@ -224,8 +295,8 @@ def render(layout, record=None, keep_missing=True, chain=()):
     """Render a layout. Returns (RGB image, warning strings, blank elements).
 
     Blank elements drew nothing: QR codes and barcodes with empty or invalid
-    data, and text whose fields are all empty, as
-    {"i": element index, "type": "qr"|"barcode"|"text", "why": "empty"|"invalid"}.
+    data, images missing or unreadable, and text whose fields are all empty, as
+    {"i": element index, "type": "qr"|"barcode"|"image"|"text", "why": "empty"|"invalid"}.
     The editor marks them; they are never drawn into the image.
     """
     record = record or {}
@@ -262,6 +333,10 @@ def render(layout, record=None, keep_missing=True, chain=()):
         elif kind in ("qr", "barcode"):
             draw = _draw_qr if kind == "qr" else _draw_barcode
             why = draw(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
+            if why:
+                blank.append({"i": i, "type": kind, "why": why})
+        elif kind == "image":
+            why = _draw_image(mask, el, warnings)
             if why:
                 blank.append({"i": i, "type": kind, "why": why})
         elif kind == "rect":

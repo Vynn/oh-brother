@@ -58,6 +58,7 @@ class Config(ApiTest):
         self.assertEqual(meta["field_pattern"], fields.PLACEHOLDER.pattern)
         self.assertEqual(meta["builtin_fields"], ["date", "time", "datetime"])
         self.assertEqual([b["id"] for b in meta["barcodes"]], ["code128", "ean13", "ean8", "upca", "itf14"])
+        self.assertEqual(meta["image_budget"], 128 * 1024)   # the editor shrinks images to fit
 
     def test_only_known_settings_are_saved(self):
         cfg = self.post("/api/config", {"printer_host": "192.168.1.50", "other": 1}).get_json()["config"]
@@ -126,6 +127,11 @@ class Print(ApiTest):
         out = self.print(layout(CODE, LINK), records, copies=2).get_json()
         self.assertEqual(out["labels"], 4)
         self.assertEqual(out["warnings"], ["QR code empty on 2 labels; printed blank"])
+
+    def test_missing_image_is_a_warning(self):
+        img = {"type": "image", "x": 2, "y": 2, "w": 10, "h": 10, "src": ""}
+        self.assertEqual(self.print(layout(img), [{}, {}]).get_json()["warnings"],
+                         ["Image empty on 2 labels; printed blank"])
 
     def test_hidden_text_is_not_a_warning(self):
         self.assertEqual(self.print(layout(TITLE), [{}]).get_json()["warnings"], [])

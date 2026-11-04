@@ -2,6 +2,27 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.4.0 · 2026-11-04
+
+Images, a layered shelf tag, and retail barcodes.
+
+### Added
+
+- An image element, for a logo, symbol or picture, printed in black or red. The printer has no grey, so the image becomes dots at print size, and the preview shows exactly which. *Threshold* prints whatever is darker than its slider, which keeps a logo's edges crisp; *Dither* shows shading as a pattern of dots. Transparent parts print nothing, and *Inverted* prints the box and leaves the image's dark parts blank. Images fit their box without stretching, and a small one warns that it may print blocky.
+- Images from a file (PNG, JPEG, WebP, GIF or SVG) or a web address, saved with the template. An address is fetched once, by the app rather than the browser, so a template still prints offline. Addresses are checked first, and this computer's own and link-local addresses refused; downloads stop at 10 MB or 10 seconds, and anything that isn't an image is refused. Each image takes up at most 128 KB in a template: the editor shrinks larger ones and shows the size. Images are kept in colour, ready for a two-colour mode later.
+- The layered shelf tag, in Retail: a slot for a logo or symbol beside `{{category}}`, the price in an outlined box with an optional `{{note}}` under it, then `{{title}}` and `{{variant}}`. Its thumbnail marks the slot with a star, and the last image chosen fills the slot when switching layouts.
+- Barcode types: Code 128 as before, and the retail codes EAN-13 (ISBN-13 and JAN too), EAN-8, UPC-A and ITF-14, with a format hint for each. A retail code needs every digit, check digit included, and ignores spaces and hyphens. A wrong check digit is refused with the right one named; the barcode library would have quietly corrected it into another product's code. A code a digit short suggests a leading zero dropped by a spreadsheet.
+- Retail barcodes print in their standard style: digits grouped under each half, the guard bars running down between them, UPC-A's outer digits smaller beside the bars, and bars along the top and bottom of ITF-14. They warn when they're too small for checkout scanners.
+
+### Changed
+
+- Every barcode keeps the blank margins scanners need, its quiet zones, inside its box. Code 128 barcodes used to run to the edges, where text or a box beside one could stop it scanning; they now draw a little narrower.
+
+### Fixed
+
+- Quick-layout thumbnails drew outline-only boxes as solid blocks.
+- A barcode warning appeared once for every barcode it applied to.
+
 ## 0.3.5 · 2026-11-01
 
 Exact package versions, tests on four platforms, and labels laid out the same on every computer.

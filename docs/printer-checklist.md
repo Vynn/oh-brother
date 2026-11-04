@@ -1,6 +1,6 @@
 # Printer checklist
 
-The tests compare every label image and print job byte for byte, but they can't show what the printer does with them. Before a release that changes printing (`render.py`, `printer.py`, `tapes.py`, or the Pillow or brother_ql versions), go through this list on a real QL-820NWB. It takes about ten minutes and a metre or so of tape.
+The tests compare every label image and print job byte for byte, but they can't show what the printer does with them. Before a release that changes printing (`render.py`, `printer.py`, `tapes.py`, `barcodes.py`, or the Pillow, brother_ql or python-barcode versions), go through this list on a real QL-820NWB. It takes about ten minutes and a metre or so of tape.
 
 Start the app with a separate data folder, so your own templates and settings stay out of it:
 
@@ -27,6 +27,13 @@ Note anything that fails, with a photo of the label, before releasing.
 - [ ] A continuous label set to 50 mm measures the *Cut* size shown under the preview, give or take 0.5 mm.
 - [ ] With *Along tape*, the text runs along the tape and reads the right way round, as in the preview.
 - [ ] A barcode, from the *Barcode* quick layout, scans with a phone.
+
+## Images and barcodes
+
+- [ ] An image element with a logo, on *Threshold*, prints with crisp edges, dot for dot as in the preview. In red, on two-colour tape, it prints red.
+- [ ] The same image on *Dither* shows its shading as a fine pattern of dots.
+- [ ] Barcodes of each retail type scan with a phone or a checkout scanner and give their digits: EAN-13 `4006381333931`, EAN-8 `96385074`, UPC-A `036000291452`, and ITF-14 `15400141288763`, which prints with bars along its top and bottom.
+- [ ] A Code 128 barcode with text or a box right beside it still scans: the quiet zones keep it clear.
 
 ## Other tapes, if you have them
 

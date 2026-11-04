@@ -32,6 +32,12 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Faster printing on two-colour tape, and tests for drawing, printing and starting the app (shipped in 0.3.4)
 - [x] Exact package versions, tests on four platforms on every change, and labels laid out the same on every computer (shipped in 0.3.5)
 
+## 0.4 · Images and retail barcodes · released
+
+- [x] An image element, printed in black or red with a threshold or dithering, from a file or a web address, and saved with the template
+- [x] A layered shelf tag quick layout, with a slot for a logo or symbol
+- [x] Retail barcodes: EAN-13, EAN-8, UPC-A and ITF-14, with their check digits checked, and quiet zones kept for every barcode
+
 ## Under consideration
 
 Not scheduled yet.
@@ -39,3 +45,6 @@ Not scheduled yet.
 - Click-to-launch: a Quit button, a single running instance, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
 - Windows: a `run.bat` launcher and a Windows runtime
 - ARM Linux and macOS tried in real use (CI has built and tested them since 0.3.5)
+- Two-colour images: the black and red parts of one image printed in their own colours
+- More barcodes: UPC-E for small packages, and GS1-128 for shipping labels
+- Editor tests in a browser, with `app.js` split into modules

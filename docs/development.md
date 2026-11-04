@@ -40,7 +40,9 @@ The tests use Python's built-in `unittest`, so they run on the bundled runtime w
 They cover the server side, against a temporary data folder:
 
 - **Fields and data files:** filling and tidying fields, and reading every data format. Spreadsheets are built in memory.
-- **Drawing:** every element type and option, the size warnings, and canvas sizes. Ten layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along.
+- **Drawing:** every element type and option, the size warnings, and canvas sizes. Thirteen layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along, images in every mode, and every barcode type.
+- **Images and barcodes:** image modes, transparency, fitting and the size limits; check digits, lengths, quiet zones, guard and bearer bars for each barcode type.
+- **Images from a web address:** fetched from a small web server on this machine: images, SVG, redirects, pages that aren't images, an entity bomb, missing, oversized, endless and slow downloads, and the address rules.
 - **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer.
 - **The API:** requests from other sites, errors, templates, the editor's page and files, and the stream that counts open pages.
 - **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.

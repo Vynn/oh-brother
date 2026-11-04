@@ -248,11 +248,14 @@ table { border-collapse: collapse; }
 .status { color: var(--muted); font-size: 12px; margin: 0; }
 .status.ok { color: var(--ok); }
 .status.err { color: var(--red); }
-/* Template and data messages take no room until there is one */
-.tpl-status:empty, .data-status:empty { display: none; }
+/* Template, data and image messages take no room until there is one */
+.tpl-status:empty, .data-status:empty, .img-status:empty { display: none; }
 
 /* ---- right ------------------------------------------------------------ */
-.add-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; margin-bottom: 10px; }
+.add-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin-bottom: 10px; }
+/* Three buttons on the first row, two wider ones on the second */
+.add-row button { grid-column: span 2; }
+.add-row button:nth-child(n+4) { grid-column: span 3; }
 .add-row button { padding: 0 4px; font-size: 12px; }
 .el-list { list-style: none; margin: 0; padding: 0; }
 .el-list li {
@@ -287,3 +290,18 @@ dialog::backdrop { background: rgba(20,20,20,.25); }
   .panel.left, .panel.right { border: 0; border-bottom: 1px solid var(--line); }
   .center { min-height: 80vh; }
 }
+
+/* ---- image element ------------------------------------------------------ */
+/* The chosen image in grey, on a checkerboard so transparent parts show */
+.img-pick { display: flex; align-items: center; gap: 10px; }
+.img-pick img, .img-pick .none {
+  width: 64px; height: 64px; flex: none; object-fit: contain; border: 1px solid var(--line); border-radius: var(--radius);
+  background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 10px 10px; filter: grayscale(1);
+}
+.img-pick > div { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.img-meta { font-size: 11px; color: var(--faint); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.img-pick .none { display: flex; align-items: center; justify-content: center; text-align: center; color: var(--faint); font-size: 11px; background: var(--surface); }
+.range-label { display: flex; justify-content: space-between; }
+.range-label span { color: var(--text); font-variant-numeric: tabular-nums; }
+.field > input[type="range"] { accent-color: var(--ink); margin: 0; }
+.field > input[type="range"]:disabled { opacity: .35; }

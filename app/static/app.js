@@ -45,7 +45,8 @@ const S = {
   picked: new Set(),    // data rows ticked for printing
   cur: 0,               // data row shown in the preview
   placeholders: [],     // the layout's field names, from the last preview
-  blank: new Map(),     // element index -> "empty"|"invalid": codes and text the last preview left blank
+  blank: new Map(),     // element index -> "empty"|"invalid": codes, images and text the last preview left blank
+  glyph: null,          // the last image chosen, for quick layouts with an empty image slot
   scale: 1,             // screen px per dot
 };
 
@@ -173,6 +174,11 @@ const snap = (v) => imperial() ? r2(Math.round(v / 0.508) * 0.508) : Math.round(
 // for templates that leave a key out.
 const TEXT = { font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0 };
 
+// Image defaults. The image is kept in colour, ready for a two-colour mode
+// later; for now it prints in the element's one colour.
+const IMAGE = { src: "", name: "", mode: "threshold", threshold: 50, invert: false };
+const imageOf = (e) => Object.fromEntries(Object.keys(IMAGE).map((k) => [k, e[k] ?? IMAGE[k]]));   // its image settings
+
 function newElement(type) {
   const c = canvasMM();
   const base = { type, color: "black", x: 2, y: 2 };
@@ -181,6 +187,7 @@ function newElement(type) {
     case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{code}}", ec: "M" }; }
     case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", show_text: true };
     case "rect": return { ...base, w: r1(c.w - 4), h: 1, fill: true, stroke_mm: 0.5 };
+    case "image": { const s = r1(Math.min(20, Math.min(c.w, c.h) - 4)); return { ...base, ...IMAGE, w: s, h: s }; }
   }
 }
 
@@ -202,6 +209,7 @@ const QR = (o) => ({ type: "qr", color: "black", data: "{{code}}", ec: "M", ...o
 const BAR = (o) => ({ type: "barcode", color: "black", data: "{{code}}", show_text: true, ...o });
 
 const RULE = (o) => ({ type: "rect", color: "black", fill: true, stroke_mm: 0.3, ...o });
+const IMG = (o) => ({ type: "image", color: "black", ...IMAGE, ...o });
 
 // Generic size check for a built layout: scannable codes, readable text
 function checkEls(els) {
@@ -278,6 +286,53 @@ function priceTag(code, sale) {
     fits: (W, H, red) => sale && !red ? NEEDS_RED
       : shapeOf(W, H) !== "thin" && Math.min(W, H) < 20 ? "Needs a larger label" : checkEls(make(W, H)) };
 }
+
+// Layered shelf tag: a glyph (an image) and category across the top, the price in an
+// outlined box at the right, then the product name, large, and a smaller
+// variant line. Fields: {{category}}, {{title}}, {{variant}}, {{price}}, and
+// {{note}} under the price, such as a bulk discount. Empty ones are hidden.
+const layeredShelfTag = {
+  name: "Layered shelf tag", cat: "retail",
+  make: (W, H, m = marginFor(W, H)) => {
+    const iw = W - 2 * m, ih = H - 2 * m, gap = Math.max(0.5, m / 2);
+    const line = (o) => T({ wrap: false, ...o });
+    const priceBox = (x, y, w, bh) => {
+      const p = Math.min(1, bh * 0.08), ph = (bh - 2 * p) * 0.68;
+      return [{ type: "rect", color: "black", fill: false, stroke_mm: 0.3, x, y, w, h: bh },
+        line({ x: x + p, y: y + p, w: w - 2 * p, h: ph, text: "{{price}}", align: "center" }),
+        line({ x: x + p, y: y + p + ph, w: w - 2 * p, h: bh - 2 * p - ph, text: "{{note}}", align: "center" })];
+    };
+    if (shapeOf(W, H) === "thin") {
+      // Left to right: glyph | category, name and variant stacked | price box
+      const g = ih, pw = Math.min(iw * 0.3, ih * 2.6), tx = m + g + gap, tw = iw - g - pw - 2 * gap;
+      return [IMG({ x: m, y: m, w: g, h: g }),
+        line({ x: tx, y: m, w: tw, h: ih * 0.28, text: "{{category}}" }),
+        line({ x: tx, y: m + ih * 0.28, w: tw, h: ih * 0.46, text: "{{title}}" }),
+        line({ x: tx, y: m + ih * 0.74, w: tw, h: ih * 0.26, text: "{{variant}}" }),
+        ...priceBox(W - m - pw, m, pw, ih)];
+    }
+    if (shapeOf(W, H) === "tall") {
+      // Stacked: glyph and category, name, variant, and the price box across the bottom
+      const g = ih * 0.18, nh = ih * 0.2, vh = ih * 0.12, ph = ih * 0.3, ny = m + g + gap;
+      return [IMG({ x: m, y: m, w: g, h: g }),
+        line({ x: m + g + gap, y: m + g * 0.14, w: iw - g - gap, h: g * 0.72, text: "{{category}}" }),
+        line({ x: m, y: ny, w: iw, h: nh, text: "{{title}}" }),
+        line({ x: m, y: ny + nh, w: iw, h: vh, text: "{{variant}}" }),
+        ...priceBox(m, H - m - ph, iw, ph)];
+    }
+    // As on a shop shelf: the top band holds the glyph and category at the
+    // left and the price box at the right; the name and variant run below
+    const bh = ih * 0.44, pw = iw * 0.4, g = bh * 0.8;
+    const cx = m + g + gap, nh = ih * 0.3, ny = m + bh + gap;
+    return [IMG({ x: m, y: m + (bh - g) / 2, w: g, h: g }),
+      line({ x: cx, y: m + (bh - g * 0.72) / 2, w: W - m - pw - gap - cx, h: g * 0.72, text: "{{category}}" }),
+      ...priceBox(W - m - pw, m, pw, bh),
+      line({ x: m, y: ny, w: iw, h: nh, text: "{{title}}" }),
+      line({ x: m, y: ny + nh, w: iw, h: H - m - ny - nh, text: "{{variant}}" })];
+  },
+  fits: (W, H) => shapeOf(W, H) === "thin" ? (H < 8.5 ? "Needs wider tape" : checkEls(layeredShelfTag.make(W, H)))
+    : Math.min(W, H) < 18 ? "Needs a larger label" : checkEls(layeredShelfTag.make(W, H)),
+};
 
 // Quick-layout categories, in panel order
 const CATS = [["basic", "Basic"], ["storage", "Storage and inventory"], ["dates", "Dates and tracking"],
@@ -474,7 +529,7 @@ const PRESETS = [
         text: shapeOf(W, H) === "thin" ? "{{name}} · {{street}} · {{city}} {{postcode}}" : "{{name}}\n{{street}}\n{{city}} {{postcode}}" })] },
 
   // ---- Retail ----
-  priceTag("barcode", false), priceTag("qr", false), priceTag("barcode", true), priceTag("qr", true),
+  priceTag("barcode", false), priceTag("qr", false), priceTag("barcode", true), priceTag("qr", true), layeredShelfTag,
 ];
 
 // 0.01 mm, so full-width preset elements line up exactly with the label edges
@@ -506,10 +561,20 @@ function presetThumb(p, W, H) {
     } else if (e.type === "qr") {
       add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: "none", stroke: col, "stroke-width": e.w * 0.1 });
       add("rect", { x: e.x + e.w * 0.3, y: e.y + e.h * 0.3, width: e.w * 0.4, height: e.h * 0.4, fill: col });
+    } else if (e.type === "rect" && e.fill === false) {
+      add("rect", { x: e.x, y: e.y, width: e.w, height: e.h, fill: "none", stroke: col, "stroke-width": 0.6 * k });
     } else if (e.type === "rect") {
       add("rect", { x: e.x, y: e.y, width: Math.max(e.w, 0.4 * k), height: Math.max(e.h, 0.4 * k), fill: col });
     } else if (e.type === "barcode") {
       for (let i = 0; i < 18; i++) add("rect", { x: e.x + (e.w / 18) * i, y: e.y, width: (e.w / 18) * (i % 3 ? 0.4 : 0.75), height: e.h * 0.8, fill: col });
+    } else if (e.type === "image") {
+      // A star marks the image slot: plainly a placeholder, not a logo
+      const r = Math.min(e.w, e.h) * 0.48, cx = e.x + e.w / 2, cy = e.y + e.h / 2 + r * 0.06;
+      const pts = Array.from({ length: 10 }, (_, j) => {
+        const rj = j % 2 ? r * 0.4 : r, a = -Math.PI / 2 + j * Math.PI / 5;
+        return `${cx + rj * Math.cos(a)},${cy + rj * Math.sin(a)}`;
+      });
+      add("polygon", { points: pts.join(" "), fill: col });
     }
   }
   return svg;
@@ -677,12 +742,13 @@ function placeBox(box, e, i) {
   const small = e.type === "qr" || w < 36 || hh < 36;
   box.className = "box" + (S.pick.has(i) ? " sel" : "") + (S.pick.size === 1 ? " solo" : "")
     + (small ? " small" : "") + (i === S.editing ? " editing" : "");
-  // Blank QR/barcode, or text whose fields are all empty: an editor-only
+  // Blank QR/barcode/image, or text whose fields are all empty: an editor-only
   // placeholder (never part of the printed image)
   const why = S.blank.get(i);
-  if (why && ["qr", "barcode", "text"].includes(e.type)) {
+  if (why && ["qr", "barcode", "image", "text"].includes(e.type)) {
     box.classList.add("blank");
     box.dataset.blank = e.type === "text" ? "Text · empty fields"
+      : e.type === "image" ? `★ Image · ${why === "invalid" ? "can't be read" : "none chosen"}`
       : `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
   } else delete box.dataset.blank;
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
@@ -960,14 +1026,16 @@ $("#overlay").addEventListener("dblclick", (ev) => {
   select(+box.dataset.i);
   const f = $("#props").querySelector('[data-key="text"], [data-key="data"]');
   if (f) { f.focus(); f.setSelectionRange?.(f.value.length, f.value.length); }
+  else $("#props").querySelector('input[type="file"]')?.click();   // an image: choose one
 });
 
 // ---------------------------------------------------------------------------
 // Elements list & properties
 // ---------------------------------------------------------------------------
 
-const KIND = { text: "Text", qr: "QR", barcode: "Barcode", rect: "Box" };
-const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h) : e.data;
+const KIND = { text: "Text", qr: "QR", barcode: "Barcode", image: "Image", rect: "Box" };
+const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.type === "rect" ? fmt2(e.w, e.h)
+  : e.type === "image" ? e.name || (e.src ? "Image" : "None chosen") : e.data;
 
 // Selection: S.pick is the set of selected indexes; S.sel is the one shown in
 // the properties panel when exactly one is selected (otherwise -1)
@@ -1123,6 +1191,8 @@ function drawProps(light = false) {
     kids.push(fld("Text", editing(bind("text", h("textarea", { rows: 3, spellcheck: false })))));
   } else if (e.type === "qr" || e.type === "barcode") {
     kids.push(fld(e.type === "qr" ? "Data" : "Data (Code 128)", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
+  } else if (e.type === "image") {
+    kids.push(imagePicker(e));
   }
 
   kids.push(h("div", { class: "row4 num4" },
@@ -1152,11 +1222,76 @@ function drawProps(light = false) {
     kids.push(fld("Error correction", bind("ec", ec)));
   } else if (e.type === "barcode") {
     kids.push(h("div", { class: "checks" }, chk("show_text", "Show text")));
+  } else if (e.type === "image") {
+    // The printer has no grey: the image prints as black and white dots in one colour
+    const level = bind("threshold", h("input", { type: "range", min: 5, max: 95, step: 1 }), (v) => +v);
+    const shown = h("span", {});
+    const showLevel = () => { shown.textContent = `${e.threshold ?? 50}%`; level.disabled = e.mode === "dither"; };
+    level.addEventListener("input", showLevel);
+    const mode = seg("mode", [["threshold", "Threshold"], ["dither", "Dither"]]);
+    mode.addEventListener("click", showLevel);
+    showLevel();
+    kids.push(h("div", { class: "field" }, "Black and white", mode));
+    kids.push(h("label", { class: "field" }, h("span", { class: "range-label" }, "Threshold", shown), level));
+    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Threshold suits logos and line art; dither suits shading and photos."));
+    kids.push(h("div", { class: "checks" }, chk("invert", "Inverted")));
   } else if (e.type === "rect") {
     kids.push(h("div", { class: "checks" }, chk("fill", "Filled")));
     kids.push(h("div", { class: "row2" }, fld(`Outline (${units})`, num("stroke_mm", { min: 0.1, step: 0.1 }))));
   }
   box.replaceChildren(...kids);
+}
+
+// The chosen image (shown in grey, as it prints for now), and a button to choose another
+function imagePicker(e) {
+  const i = S.sel;
+  const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/svg+xml" });
+  input.addEventListener("change", async () => {
+    const f = input.files[0];
+    if (!f) return;
+    try {
+      Object.assign(S.layout.elements[i], { src: await readImage(f), name: f.name });
+      S.glyph = imageOf(S.layout.elements[i]);
+      drawList(); drawProps(); schedule();
+    } catch (err) { status(err.message, "err", "#imgStatus"); }
+  });
+  return h("div", { class: "field" }, "Image",
+    h("div", { class: "img-pick" },
+      e.src ? h("img", { src: e.src, alt: "" }) : h("span", { class: "none" }, "None chosen"),
+      h("div", {},
+        h("label", { class: "file-btn" }, e.src ? "Replace…" : "Choose…", input),
+        // What it adds to a template
+        e.src && h("div", { class: "img-meta", title: e.name || null },
+          `${e.name || "Image"} · ${Math.max(1, Math.round(e.src.length / 1024))} KB`))),
+    h("p", { class: "status img-status", id: "imgStatus", role: "status" }));
+}
+
+// An image file as a data URL that fits the server's budget (S.meta.image_budget,
+// counted as stored in a template). PNG at up to IMAGE_MAX px on the long side
+// first, which keeps logos lossless; then WebP, which suits photos; then the
+// same at smaller sizes, down to IMAGE_MIN. SVGs are drawn here, scaled up to
+// IMAGE_MAX, since the server can't read them.
+const IMAGE_MAX = 600, IMAGE_MIN = 128;
+async function readImage(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    try { await img.decode(); } catch { throw new Error("This browser can't read that file as an image"); }
+    const svg = file.type === "image/svg+xml";
+    const w0 = img.naturalWidth || IMAGE_MAX, h0 = img.naturalHeight || IMAGE_MAX;   // an SVG may have no size
+    const budget = S.meta.image_budget;
+    for (let side = svg ? IMAGE_MAX : Math.min(IMAGE_MAX, Math.max(w0, h0)); side >= IMAGE_MIN; side = Math.floor(side * 0.8)) {
+      const k = side / Math.max(w0, h0);
+      const cv = h("canvas", { width: Math.max(1, Math.round(w0 * k)), height: Math.max(1, Math.round(h0 * k)) });
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      const png = cv.toDataURL("image/png");
+      if (png.length <= budget) return png;
+      const webp = cv.toDataURL("image/webp", 0.9);   // a browser without WebP gives PNG again
+      if (webp.startsWith("data:image/webp") && webp.length <= budget) return webp;
+    }
+    throw new Error(`That image doesn't fit in ${Math.round(budget / 1024)} KB even at ${IMAGE_MIN} px; try a simpler one`);
+  } finally { URL.revokeObjectURL(url); }
 }
 
 document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
@@ -1246,6 +1381,11 @@ function drawPresets() {
       return h("button", { type: "button", class: "preset", disabled: !!why, title: why || null, onclick: () => {
         let els = roundAll(p.make(c.w, c.h));
         if (!red) els = els.map((e) => ({ ...e, color: "black" }));
+        // The last image chosen fills the new layout's empty image slot, as typed
+        // values carry over, even after a layout without one
+        const had = S.layout.elements.find((e) => e.type === "image" && e.src);
+        if (had) S.glyph = imageOf(had);
+        if (S.glyph) for (const e of els) if (e.type === "image" && !e.src) Object.assign(e, S.glyph);
         S.layout.elements = els;
         select(-1); schedule(); checkpoint();
       } }, presetThumb(p, c.w, c.h), h("span", {}, p.name));

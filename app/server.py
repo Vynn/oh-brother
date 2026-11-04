@@ -64,8 +64,11 @@ class Presence:
             return time.monotonic() - self.idle_since
 
 
+BLANK_NAMES = {"qr": "QR code", "barcode": "Barcode", "image": "Image"}
+
+
 def blank_code_warnings(blanks, copies):
-    """Print warnings for QR codes and barcodes left blank, counted by label.
+    """Print warnings for QR codes, barcodes and images left blank, counted by label.
 
     `blanks` holds render()'s blank list for each record. Text hidden because
     its fields are empty isn't counted: hiding it is intended.
@@ -77,7 +80,7 @@ def blank_code_warnings(blanks, copies):
             counts[key] = counts.get(key, 0) + copies
     out = []
     for (kind, why), n in sorted(counts.items()):
-        name = "QR code" if kind == "qr" else "Barcode"
+        name = BLANK_NAMES.get(kind, kind)
         out.append(f"{name} {why} on {n} label{'' if n == 1 else 's'}; printed blank")
     return out
 
@@ -206,10 +209,12 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     @app.get("/api/meta")
     def meta():
         cfg = load_config()
-        # The field tag pattern and built-in fields, so the editor finds fields as the server does
+        # The field tag pattern and built-in fields, so the editor finds fields as the server
+        # does, and the most an image may take up, which the editor shrinks images to fit
         return jsonify(config=cfg, models=MODELS, tapes=tapes.tape_list(cfg["model"]),
                        fonts=list(render.FONT_FILES), dpmm=tapes.DPMM,
-                       field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS))
+                       field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS),
+                       image_budget=render.MAX_IMAGE_CHARS)
 
     @app.post("/api/config")
     def save_config():

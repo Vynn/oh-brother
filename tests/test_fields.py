@@ -1,5 +1,6 @@
 """Field filling: fields.fill(), fields.fill_text() and fields.placeholders()."""
 
+import datetime
 import unittest
 
 import fields
@@ -15,6 +16,13 @@ class Fill(unittest.TestCase):
         self.assertRegex(fields.fill("{{Date}}", {}, False), r"^\d{4}-\d\d-\d\d$")
         self.assertRegex(fields.fill("{{time}}", {}, False), r"^\d\d:\d\d$")
         self.assertRegex(fields.fill("{{datetime}}", {}, False), r"^\d{4}-\d\d-\d\d \d\d:\d\d$")
+
+    def test_builtins_show_the_time_given(self):
+        # A print job gives every label the same one
+        now = datetime.datetime(2026, 1, 2, 3, 4, 59)
+        self.assertEqual(fields.fill("{{date}} / {{time}} / {{datetime}}", {}, False, now=now),
+                         "2026-01-02 / 03:04 / 2026-01-02 03:04")
+        self.assertEqual(fields.fill_text("At {{time}}", {}, False, now=now), ("At 03:04", False))
 
     def test_record_overrides_builtin(self):
         self.assertEqual(fields.fill("{{date}}", {"Date": "soon"}, False), "soon")

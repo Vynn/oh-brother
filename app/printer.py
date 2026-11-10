@@ -35,14 +35,40 @@ def _filtered_hsv(im, filter_h, filter_s, filter_v, default_col=(255, 255, 255))
 brother_ql.conversion.filtered_hsv = _filtered_hsv   # convert() looks it up there
 
 
+class _Turned:
+    """Canvases turned for the printer one at a time, as convert() reaches them.
+
+    convert() asks only for the number of images and goes through them once,
+    so a long job never needs every label's image in memory together.
+    """
+
+    def __init__(self, layout, images):
+        self.layout, self.images = layout, images
+
+    def __len__(self):
+        return len(self.images)
+
+    def __iter__(self):
+        return (render.print_image(self.layout, im) for im in self.images)
+
+
 def build_job(layout, images, model, cut=True):
-    """Convert rendered canvases into one raster job (bytes)."""
+    """Convert rendered canvases into one raster job (bytes).
+
+    `images` is a list, or anything with a length that can be gone through
+    once: the server passes labels that are drawn only as they're reached.
+    """
     tape = tapes.label(layout.get("tape", "62red"))
     qlr = BrotherQLRaster(model)
     qlr.exception_on_warning = True
-    return convert(
+    # brother_ql builds the job with +=. Its own buffer is bytes, which copies
+    # the whole job on every addition, so each label took longer than the one
+    # before: 24 to 68 ms a label at 400 labels, against 6.5 ms for any number
+    # now. A bytearray grows in place, and the job is byte for byte the same.
+    qlr.data = bytearray()
+    return bytes(convert(
         qlr=qlr,
-        images=[render.print_image(layout, im) for im in images],
+        images=_Turned(layout, images),
         label=tape.identifier,
         rotate="0" if tape.form_factor == FormFactor.ENDLESS else "auto",
         threshold=50,
@@ -52,7 +78,7 @@ def build_job(layout, images, model, cut=True):
         dpi_600=False,
         hq=True,
         cut=cut,
-    )
+    ))
 
 
 def send(host, port, data, timeout=10):

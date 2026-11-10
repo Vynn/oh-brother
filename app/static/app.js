@@ -59,10 +59,29 @@ addEventListener("pagehide", save);
 const restore = () => {
   try {
     const j = JSON.parse(localStorage.getItem(STORE) || "null");
-    if (j?.layout) { S.layout = j.layout; S.fixed = lowerKeys(j.fixed); return true; }
+    const layout = tidyLayout(j?.layout);
+    if (layout) { S.layout = layout; S.fixed = lowerKeys(j.fixed); return true; }
   } catch {}
   return false;
 };
+
+// A layout from a template or this browser's storage, made safe to edit, or
+// null if it isn't a layout at all. The editor does arithmetic on every
+// element's position and size, so one saved by an older build or edited by
+// hand gets the missing pieces filled in rather than breaking the page.
+function tidyLayout(l) {
+  if (!l || typeof l !== "object" || Array.isArray(l)) return null;
+  // A number, or a default: the renderer's own, for a key that's missing or isn't one
+  const or = (v, d) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(+v) ? +v : d;
+  const [min, max] = S.meta.limits.length_mm;
+  const elements = (Array.isArray(l.elements) ? l.elements : [])
+    .filter((e) => e && typeof e === "object" && !Array.isArray(e))
+    .map((e) => ({ ...e, x: or(e.x, 0), y: or(e.y, 0), w: or(e.w, 10), h: or(e.h, 10),
+      ...(e.type === "text" ? { text: String(e.text ?? "") } : {}) }));
+  return { ...l, tape: typeof l.tape === "string" ? l.tape : "62red",
+    length_mm: Math.max(min, Math.min(max, or(l.length_mm, 30))),
+    orientation: l.orientation === "landscape" ? "landscape" : "portrait", elements };
+}
 
 // ---------------------------------------------------------------------------
 // Undo history: snapshots of the layout and fixed values. Every edit calls
@@ -597,7 +616,7 @@ const fkey = (p) => p.toLowerCase();
 // state used the spelling). Where two spellings collide, the first value set wins.
 function lowerKeys(obj) {
   const out = {};
-  for (const [k, v] of Object.entries(obj || {})) {
+  for (const [k, v] of Object.entries(obj && typeof obj === "object" ? obj : {})) {
     const key = fkey(k);
     if (!(key in out) || (out[key] === "" && v !== "")) out[key] = v;
   }
@@ -768,7 +787,7 @@ function snapTargets(skip) {
   const c = canvasMM();
   const xs = [0, c.w / 2, c.w], ys = [0, c.h / 2, c.h];
   S.layout.elements.forEach((o, j) => {
-    if (skip.has(j) || o.hidden) return;
+    if (skip.has(j)) return;
     xs.push(o.x, o.x + o.w / 2, o.x + o.w);
     ys.push(o.y, o.y + o.h / 2, o.y + o.h);
   });
@@ -1111,10 +1130,19 @@ function bind(key, input, conv = (v) => v) {
 // Lengths: shown and typed in the display unit, stored in mm. min and step
 // are given in mm; in inches the step is 0.02 in (0.01 in for fine ones).
 const num = (key, { min, step = 0.5 } = {}) => {
+  const e = S.layout.elements[S.sel];
   const input = bind(key, h("input", { type: "number",
     step: imperial() ? (step < 0.5 ? 0.01 : 0.02) : step,
     min: min == null ? null : imperial() ? Math.max(min && 0.01, toUnit(min)) : min }), (v) => fromUnit(+v || 0));
-  input.value = toUnit(S.layout.elements[S.sel][key] ?? 0);
+  input.value = toUnit(e[key] ?? 0);
+  // The browser doesn't hold typing to `min`. Once typing is done, a value
+  // below it (a width cleared, or set to 0) goes back up to it: an element
+  // with no width can't be picked up on the label.
+  if (min != null) input.addEventListener("change", () => {
+    if (e[key] >= min) return;
+    e[key] = min; input.value = toUnit(min);
+    drawList(); drawOverlay(); schedule();
+  });
   return input;
 };
 const fld = (label, ...kids) => h("label", { class: "field" }, label, ...kids);
@@ -1254,12 +1282,18 @@ function drawProps(light = false) {
 
 // The chosen image (shown in grey, as it prints for now), and a button to choose another
 function imagePicker(e) {
-  const i = S.sel;
-  // A file, or one fetched from an address, shrunk to fit and stored in the layout
+  // A file, or one fetched from an address, shrunk to fit and stored in the
+  // layout. It goes to this element itself, not to whatever now sits at its
+  // place in the list: a fetch can take ten seconds, and by then another
+  // element may be selected, or this one deleted or undone, in which case
+  // the image is dropped.
   const use = async (file, more) => {
-    Object.assign(S.layout.elements[i], { src: await readImage(file), name: file.name, url: "", ...more });
-    S.glyph = imageOf(S.layout.elements[i]);
-    drawList(); drawProps(); schedule();
+    const src = await readImage(file);
+    if (!S.layout.elements.includes(e)) return;
+    Object.assign(e, { src, name: file.name, url: "", ...more });
+    S.glyph = imageOf(e);
+    drawList(); schedule();
+    if (S.layout.elements[S.sel] === e) drawProps();   // only its own panel is rebuilt
   };
   const input = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/gif,image/svg+xml" });
   input.addEventListener("change", async () => {
@@ -1311,7 +1345,11 @@ async function readImage(file) {
     const svg = file.type === "image/svg+xml";
     const w0 = img.naturalWidth || IMAGE_MAX, h0 = img.naturalHeight || IMAGE_MAX;   // an SVG may have no size
     const budget = S.meta.image_budget;
-    for (let side = svg ? IMAGE_MAX : Math.min(IMAGE_MAX, Math.max(w0, h0)); side >= IMAGE_MIN; side = Math.floor(side * 0.8)) {
+    // An image never grows, so one smaller than IMAGE_MIN is tried at its own
+    // size. The loop used to stop before its first pass for such an image,
+    // and a 40 px icon was refused as too large.
+    const start = svg ? IMAGE_MAX : Math.min(IMAGE_MAX, Math.max(w0, h0)), least = Math.min(IMAGE_MIN, start);
+    for (let side = start; side >= least; side = Math.floor(side * 0.8)) {
       const k = side / Math.max(w0, h0);
       const cv = h("canvas", { width: Math.max(1, Math.round(w0 * k)), height: Math.max(1, Math.round(h0 * k)) });
       cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
@@ -1320,7 +1358,7 @@ async function readImage(file) {
       const webp = cv.toDataURL("image/webp", 0.9);   // a browser without WebP gives PNG again
       if (webp.startsWith("data:image/webp") && webp.length <= budget) return webp;
     }
-    throw new Error(`That image doesn't fit in ${Math.round(budget / 1024)} KB even at ${IMAGE_MIN} px; try a simpler one`);
+    throw new Error(`That image doesn't fit in ${Math.round(budget / 1024)} KB even at ${least} px; try a simpler one`);
   } finally { URL.revokeObjectURL(url); }
 }
 
@@ -1339,10 +1377,10 @@ function drawTapes() {
 }
 
 function drawSetup() {
-  const t = tape(), len = $("#length");
+  const t = tape(), len = $("#length"), [min, max] = S.meta.limits.length_mm;
   $("#tape").value = t.id;
   $("#lengthUnit").textContent = units;
-  Object.assign(len, imperial() ? { step: 0.1, min: 0.2, max: 39.37 } : { step: 1, min: 5, max: 1000 });
+  Object.assign(len, { step: imperial() ? 0.1 : 1, min: toUnit(min), max: toUnit(max) });
   len.value = toUnit(S.layout.length_mm);
   $("#lengthRow").querySelector("label").hidden = !t.endless;
   $("#printable").textContent = t.endless ? `${fmt(t.printable_mm[0])} wide` : fmt2(...t.printable_mm);
@@ -1378,7 +1416,10 @@ function reshape(change) {
 
 $("#tape").addEventListener("change", (ev) => reshape(() => { S.layout.tape = ev.target.value; }));
 // "change" (not "input") so typing 50 doesn't pass through a 5 mm label
-$("#length").addEventListener("change", (ev) => reshape(() => { S.layout.length_mm = Math.max(5, Math.min(1000, fromUnit(+ev.target.value) || 5)); }));
+$("#length").addEventListener("change", (ev) => reshape(() => {
+  const [min, max] = S.meta.limits.length_mm;
+  S.layout.length_mm = Math.max(min, Math.min(max, fromUnit(+ev.target.value) || min));
+}));
 // Units change only what's shown, so there's no undo step
 $("#units").addEventListener("click", (ev) => {
   const v = ev.target.dataset.v;
@@ -1462,8 +1503,10 @@ async function loadTemplate(n, sample = false) {
   try {
     j = await api(`/api/${sample ? "samples" : "templates"}/${encodeURIComponent(n)}`);
   } catch (e) { status(e.message, "err", "#tplStatus"); return; }
+  const layout = tidyLayout(j.layout);
+  if (!layout) { status(`“${n}” has no layout, so it can't be opened`, "err", "#tplStatus"); return; }
   status("", "", "#tplStatus");
-  S.layout = j.layout; S.fixed = lowerKeys(j.fixed);
+  S.layout = layout; S.fixed = lowerKeys(j.fixed);
   if (j.mapping) S.mapping = { ...S.mapping, ...lowerKeys(j.mapping) };
   $("#tplName").value = sample ? "" : n;   // so Save asks for a name, and can't overwrite one of yours
   S.sel = -1; S.pick = new Set();
@@ -1521,7 +1564,10 @@ function drawData() {
 
   $("#rowsWrap").hidden = !S.data;
   $("#dataClear").hidden = !S.data;
-  if (!S.data) $("#dataInfo").innerHTML = "Type <code>{{name}}</code> in any text, QR or barcode to create a field. Built-in: <code>{{date}}</code> <code>{{time}}</code>";
+  // The hint, with the built-in fields as the server lists them
+  if (!S.data) $("#dataInfo").replaceChildren("Type ", h("code", {}, "{{name}}"),
+    " in any text, QR or barcode to create a field. Built-in:",
+    ...S.meta.builtin_fields.flatMap((f) => [" ", h("code", {}, `{{${f}}}`)]));
   drawPicked();
 }
 
@@ -1593,22 +1639,30 @@ $("#dataClear").addEventListener("click", () => {
 // Printing
 // ---------------------------------------------------------------------------
 
-function jobRecords() {
-  if (!S.data) return [record(null)];
-  return [...S.picked].sort((a, b) => a - b).map((i) => record(S.data.rows[i]));
-}
+// Printing more labels than this asks first. Loading a data file ticks every
+// row, so one click could otherwise send the whole file to the printer.
+const CONFIRM_ABOVE = 25;
+
+// The ticked data rows, in order, or null without data (one label from fixed values)
+const jobRows = () => S.data ? [...S.picked].sort((a, b) => a - b) : null;
+
+// Copies as the server will take them: a whole number from 1 to its limit
+const copies = () => Math.max(1, Math.min(S.meta.limits.copies, Math.floor(+$("#copies").value || 1)));
+const labelCount = () => (S.data ? S.picked.size : 1) * copies();
 
 function drawPrintButton() {
-  const n = (S.data ? S.picked.size : 1) * Math.max(1, +$("#copies").value || 1);
-  const b = $("#printBtn");
+  const n = labelCount(), b = $("#printBtn");
   b.textContent = n === 1 ? "Print 1 label" : `Print ${n} labels`;
   b.disabled = n === 0;
 }
 $("#copies").addEventListener("input", drawPrintButton);
+// Once typing is done, the box shows the number that will be used
+$("#copies").addEventListener("change", (ev) => { ev.target.value = copies(); });
 
 // A status line: the print bar's, or the templates' (#tplStatus) or Data panel's (#dataStatus)
 function status(msg, cls = "", where = "#printStatus") {
   const s = $(where);
+  if (!s) return;   // an image's line (#imgStatus) is gone once another element is selected
   s.textContent = msg;
   s.classList.remove("ok", "err");
   if (cls) s.classList.add(cls);
@@ -1616,12 +1670,18 @@ function status(msg, cls = "", where = "#printStatus") {
 
 $("#printBtn").addEventListener("click", async () => {
   if (!S.meta.config.printer_host) { openSettings(); return; }
+  const n = labelCount();
+  if (n > CONFIRM_ABOVE && !confirm(`Print ${n} labels?`)) return;
   const b = $("#printBtn");
   b.disabled = true;
   status("Sending…");
   try {
+    // rows: each record's row number as the Data table shows it, so the
+    // server can name the row a label failed on
+    const rows = jobRows();
     const j = await api("/api/print", { method: "POST", body: {
-      layout: S.layout, records: jobRecords(), chain: chain(), copies: +$("#copies").value || 1, cut: $("#cut").checked } });
+      layout: S.layout, records: rows ? rows.map((i) => record(S.data.rows[i])) : [record(null)],
+      rows: rows?.map((i) => i + 1), chain: chain(), copies: copies(), cut: $("#cut").checked } });
     status(`Sent ${j.labels} label${j.labels === 1 ? "" : "s"}` + (j.warnings.length ? ` · ${j.warnings.length} warning(s)` : ""), "ok");
     if (j.warnings.length) drawWarnings(j.warnings);
   } catch (e) {
@@ -1665,12 +1725,18 @@ async function testPrinter(target) {
   return j.ok;
 }
 
+// A setting the server refuses (a port out of range, say) is shown in the
+// dialog, which stays open
+const cfgError = (e) => { $("#cfgStatus").textContent = e.message; $("#cfgStatus").className = "status err"; };
+
 $("#printerChip").addEventListener("click", openSettings);
-$("#cfgSave").addEventListener("click", async () => { await saveSettings(); $("#settings").close(); testPrinter(); });
+$("#cfgSave").addEventListener("click", async () => {
+  try { await saveSettings(); } catch (e) { cfgError(e); return; }
+  $("#settings").close(); testPrinter();
+});
 $("#cfgTest").addEventListener("click", async () => {
   $("#cfgStatus").textContent = "Testing…"; $("#cfgStatus").className = "status";
-  await saveSettings();
-  testPrinter($("#cfgStatus"));
+  try { await saveSettings(); await testPrinter($("#cfgStatus")); } catch (e) { cfgError(e); }
 });
 
 // ---------------------------------------------------------------------------
@@ -1682,11 +1748,13 @@ $("#cfgTest").addEventListener("click", async () => {
   // page closes. EventSource reconnects by itself after a drop.
   new EventSource("/api/alive");
   S.meta = await api("/api/meta");
+  $("#copies").max = S.meta.limits.copies;
   drawTapes();
   if (!restore() || !S.meta.tapes.some((t) => t.id === S.layout.tape)) {
+    // First run: the Red header quick layout on the first tape listed
     S.layout = { tape: S.meta.tapes[0].id, length_mm: 30, orientation: "portrait", elements: [] };
     const c = canvasMM();
-    S.layout.elements = roundAll(PRESETS[2].make(c.w, c.h));
+    S.layout.elements = roundAll(PRESETS.find((p) => p.name === "Red header").make(c.w, c.h));
   }
   drawAll(); drawPrinterChip(); drawTemplates(); schedule();
   checkpoint();

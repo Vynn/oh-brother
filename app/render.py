@@ -12,6 +12,7 @@ tapes.py and field filling from fields.py.
 
 import base64
 import binascii
+import datetime
 import functools
 import io
 import os
@@ -19,12 +20,19 @@ import os
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 import qrcode
+from qrcode.exceptions import DataOverflowError
 
 import barcodes
 from fields import fill, fill_text
 from tapes import DPI, DPMM, canvas_dots, label
 
 COLORS = {"black": (0, 0, 0), "red": (255, 0, 0), "white": (255, 255, 255)}
+
+# Limits on what a layout may ask for. The editor never comes near them, but a
+# slip of the keyboard (a width of 5000) or a template edited by hand could
+# otherwise ask for gigabytes of memory.
+MAX_BOX = 2          # an element's box, in label widths and heights
+MAX_FONT_PX = 3000   # 720 pt: letters 25 cm tall, taller than any tape is wide
 
 FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
 FONT_FILES = {
@@ -89,13 +97,13 @@ def _draw_text(mask, el, text, warnings):
     size_pt = float(el.get("size", 0) or 0)
 
     if size_pt > 0:
-        px = size_pt * DPI / 72
+        px = min(size_pt * DPI / 72, MAX_FONT_PX)
         font, lines, line_h, total_h, max_w = _layout_text(text, family, bold, px, bw, wrap, spacing)
         if max_w > bw + 1 or total_h > bh + 1:
             warnings.append(f"Text “{text[:20]}” overflows its box")
     else:
         # Auto size: largest size that fits the box (binary search on pixel size)
-        cap = float(el.get("max_size", 0) or 0) * DPI / 72 or bh
+        cap = min(float(el.get("max_size", 0) or 0) * DPI / 72 or bh, MAX_FONT_PX)
         lo, hi, best = 4, max(4, int(cap)), None
         while lo <= hi:
             mid = (lo + hi) // 2
@@ -122,15 +130,24 @@ def _draw_text(mask, el, text, warnings):
 
 
 def _draw_qr(mask, el, data, warnings):
-    """Draw a QR code. Returns "empty" when there is nothing to encode."""
+    """Draw a QR code. Returns "empty" or "invalid" when nothing is drawn."""
     W, H = mask.size
     if not data:
         return "empty"
     ec = {"L": qrcode.constants.ERROR_CORRECT_L, "M": qrcode.constants.ERROR_CORRECT_M,
           "Q": qrcode.constants.ERROR_CORRECT_Q, "H": qrcode.constants.ERROR_CORRECT_H}
     qr = qrcode.QRCode(border=0, error_correction=ec.get(el.get("ec", "M"), ec["M"]))
-    qr.add_data(data)
-    qr.make(fit=True)
+    try:
+        qr.add_data(data)
+        qr.make(fit=True)
+    except (DataOverflowError, ValueError):
+        # More than the largest QR code holds: about 2,900 characters at the
+        # lowest error correction, fewer at the others. qrcode says so with
+        # either error, depending on how far over the data is.
+        msg = f"QR code can't hold this much data ({len(data)} characters); shorten it"
+        if msg not in warnings:
+            warnings.append(msg)
+        return "invalid"
     matrix = qr.get_matrix()
     n = len(matrix)
     side = min(W, H)
@@ -291,25 +308,32 @@ def _draw_rect(mask, el):
         d.rectangle([0, 0, W - 1, H - 1], outline=255, width=max(1, mm(el.get("stroke_mm", 0.5))))
 
 
-def render(layout, record=None, keep_missing=True, chain=()):
+def render(layout, record=None, keep_missing=True, chain=(), now=None):
     """Render a layout. Returns (RGB image, warning strings, blank elements).
 
     Blank elements drew nothing: QR codes and barcodes with empty or invalid
     data, images missing or unreadable, and text whose fields are all empty, as
     {"i": element index, "type": "qr"|"barcode"|"image"|"text", "why": "empty"|"invalid"}.
     The editor marks them; they are never drawn into the image.
+    `now` is the date and time for {{date}} and {{time}}; every element of the
+    label gets the same one.
     """
     record = record or {}
+    now = now or datetime.datetime.now()
     warnings, blank = [], []
     tape = label(layout.get("tape", "62red"))
     red_ok = bool(tape.color)
     W, H = canvas_dots(layout)
     img = Image.new("RGB", (W, H), COLORS["white"])
-    red_downgraded = False
+    red_downgraded = oversized = False
 
     for i, el in enumerate(layout.get("elements", [])):
         x, y = mm(el.get("x", 0)), mm(el.get("y", 0))
         w, h = max(1, mm(el.get("w", 10))), max(1, mm(el.get("h", 10)))
+        # Each element gets a mask the size of its box (below), so the box is
+        # held to MAX_BOX times the label. Nothing past the label prints anyway.
+        if w > MAX_BOX * W or h > MAX_BOX * H:
+            w, h, oversized = min(w, MAX_BOX * W), min(h, MAX_BOX * H), True
         color = el.get("color", "black")
         if color == "red" and not red_ok:
             color, red_downgraded = "black", True
@@ -320,7 +344,7 @@ def render(layout, record=None, keep_missing=True, chain=()):
         # element to its box and lets later elements sit on top.
         mask = Image.new("L", (w, h), 0)
         if kind == "text":
-            text, hide = fill_text(el.get("text", ""), record, keep_missing, chain, warnings)
+            text, hide = fill_text(el.get("text", ""), record, keep_missing, chain, warnings, now)
             if hide:
                 blank.append({"i": i, "type": "text", "why": "empty"})
                 continue
@@ -332,7 +356,7 @@ def render(layout, record=None, keep_missing=True, chain=()):
             _draw_text(mask, el, text, warnings)
         elif kind in ("qr", "barcode"):
             draw = _draw_qr if kind == "qr" else _draw_barcode
-            why = draw(mask, el, fill(el.get("data", ""), record, False, chain, warnings), warnings)
+            why = draw(mask, el, fill(el.get("data", ""), record, False, chain, warnings, now), warnings)
             if why:
                 blank.append({"i": i, "type": kind, "why": why})
         elif kind == "image":
@@ -347,6 +371,8 @@ def render(layout, record=None, keep_missing=True, chain=()):
 
     if red_downgraded:
         warnings.append("This tape is black-only; red elements print in black")
+    if oversized:
+        warnings.append("An element is far larger than the label; only part of it is drawn")
     return img, warnings, blank
 
 

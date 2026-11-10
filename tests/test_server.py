@@ -59,6 +59,7 @@ class Config(ApiTest):
         self.assertEqual(meta["builtin_fields"], ["date", "time", "datetime"])
         self.assertEqual([b["id"] for b in meta["barcodes"]], ["code128", "ean13", "ean8", "upca", "itf14"])
         self.assertEqual(meta["image_budget"], 128 * 1024)   # the editor shrinks images to fit
+        self.assertEqual(meta["limits"], {"length_mm": [5, 1000], "copies": 100})   # and keeps to these
 
     def test_only_known_settings_are_saved(self):
         cfg = self.post("/api/config", {"printer_host": "192.168.1.50", "other": 1}).get_json()["config"]
@@ -69,6 +70,44 @@ class Config(ApiTest):
 
     def test_printer_test_without_an_address(self):
         self.assertEqual(self.post("/api/test").get_json(), {"ok": False, "message": "No printer address set"})
+
+    def test_settings_are_tidied(self):
+        cfg = self.post("/api/config", {"printer_host": "  printer.example ", "printer_port": "9101"}).get_json()["config"]
+        self.assertEqual((cfg["printer_host"], cfg["printer_port"]), ("printer.example", 9101))
+
+    def test_settings_that_cant_be_used_are_refused(self):
+        self.post("/api/config", {"printer_host": "192.168.1.50"})
+        port = "The port must be a number from 1 to 65535"
+        cases = [
+            ({"printer_port": "abc"}, port), ({"printer_port": 0}, port), ({"printer_port": 70000}, port),
+            ({"printer_port": True}, port), ({"printer_port": 9100.5}, port),
+            ({"printer_host": 5}, "The printer's address must be text"),
+            ({"printer_host": "my printer"}, "That isn't a printer address: use its IP address or host name"),
+            ({"model": "QL-9000"}, "Choose one of these printer models: QL-800, QL-810W, QL-820NWB"),
+            # One bad setting keeps the good ones sent with it from being saved
+            ({"printer_host": "printer.example", "printer_port": "abc"}, port),
+        ]
+        for payload, msg in cases:
+            with self.subTest(payload):
+                resp = self.post("/api/config", payload)
+                self.assertEqual((resp.status_code, resp.get_json()), (400, {"error": msg}))
+        self.assertEqual(self.client.get("/api/meta").get_json()["config"],
+                         {**server.DEFAULT_CONFIG, "printer_host": "192.168.1.50"})
+
+    def test_a_settings_file_that_cant_be_used_gives_the_defaults(self):
+        # Each setting on its own: a bad one falls back, the rest are kept
+        files = {
+            "[1]": {}, "{bad": {}, '"text"': {}, "": {},
+            '{"printer_host": "192.168.1.50", "printer_port": "abc", "model": "QL-9000"}': {"printer_host": "192.168.1.50"},
+            '{"printer_host": 5, "printer_port": 9101}': {"printer_port": 9101},
+        }
+        for raw, kept in files.items():
+            with self.subTest(raw):
+                with open(os.path.join(self.data, "config.json"), "w", encoding="utf-8") as f:
+                    f.write(raw)
+                resp = self.client.get("/api/meta")
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(resp.get_json()["config"], {**server.DEFAULT_CONFIG, **kept})
 
 
 class Preview(ApiTest):
@@ -102,6 +141,22 @@ class Preview(ApiTest):
         resp = self.post("/api/render", {"layout": layout(BAR), "record": {"code": "☃"}})
         self.assertEqual(header(resp, "X-Blank"), [{"i": 0, "type": "barcode", "why": "invalid"}])
         self.assertTrue(any(w.startswith("Barcode error") for w in header(resp, "X-Warnings")))
+
+    def test_qr_code_with_too_much_data_is_listed_as_blank(self):
+        # It used to replace the whole preview with "Invalid version (was 41, expected 1 to 40)"
+        for n in (3000, 4000, 40000):   # qrcode reports these with different errors
+            with self.subTest(n):
+                resp = self.post("/api/render", {"layout": layout(TITLE, CODE), "record": {"title": "Hi", "code": "x" * n}})
+                self.assertEqual(resp.status_code, 200)
+                self.assertEqual(header(resp, "X-Blank"), [{"i": 1, "type": "qr", "why": "invalid"}])
+                self.assertEqual(header(resp, "X-Warnings"),
+                                 [f"QR code can't hold this much data ({n} characters); shorten it"])
+
+    def test_a_layout_must_be_an_object(self):
+        for path in ("/api/render", "/api/print"):
+            with self.subTest(path):
+                resp = self.post(path, {"layout": [1], "dry_run": True})
+                self.assertEqual((resp.status_code, resp.get_json()), (400, {"error": "Expected a layout"}))
 
 
 class Print(ApiTest):
@@ -147,6 +202,53 @@ class Print(ApiTest):
                     self.assertEqual(self.print(layout(TITLE, CODE), [record], **options).status_code, 200)
                     self.assertIs(build.call_args.kwargs["cut"], True if cut is None else cut)
 
+    def test_labels_are_drawn_one_at_a_time(self):
+        # Not all before the first is converted: 5,000 rows would need gigabytes
+        records = [{"title": "A"}, {"title": "B"}, {"title": "C"}]
+        labels = server.Labels(layout(TITLE), records, 2, set(), None)
+        self.assertEqual(len(labels), 6)
+        with mock.patch.object(render, "render", wraps=render.render) as draw:
+            each = iter(labels)
+            first, copy = next(each), next(each)
+            self.assertIs(first, copy)   # a copy is the same image again
+            self.assertEqual(draw.call_count, 1)
+            self.assertEqual(len(list(each)), 4)
+            self.assertEqual(draw.call_count, 3)
+
+    def test_an_error_names_its_row(self):
+        real = render.render
+
+        def draw(lay, record, **options):
+            if record.get("title") == "bad":
+                raise ValueError("boom")
+            return real(lay, record, **options)
+
+        records = [{"title": "A"}, {"title": "bad"}]
+        with mock.patch.object(render, "render", draw):
+            # The data file's row numbers, when the editor sends them
+            self.assertEqual(self.print(layout(TITLE), records, rows=[3, 7]).get_json(),
+                             {"error": "Rendering failed on row 7: boom"})
+            self.assertEqual(self.print(layout(TITLE), records).get_json(),
+                             {"error": "Rendering failed on label 2: boom"})
+            self.assertEqual(self.print(layout(TITLE), records, rows=[3]).get_json(),   # not one for each record
+                             {"error": "Rendering failed on label 2: boom"})
+            self.assertEqual(self.print(layout(TITLE), records[1:]).get_json(), {"error": "Rendering failed: boom"})
+
+    def test_records_must_be_objects(self):
+        resp = self.print(layout(TITLE), ["Hi"])
+        self.assertEqual((resp.status_code, resp.get_json()), (400, {"error": "Records must be a list of objects"}))
+
+    def test_one_date_and_time_for_the_whole_job(self):
+        with mock.patch.object(render, "render", wraps=render.render) as draw:
+            self.print(layout(TITLE), [{"title": "A"}, {"title": "B"}, {"title": "C"}])
+        times = [call.kwargs["now"] for call in draw.call_args_list]
+        self.assertEqual(len(times), 3)
+        self.assertIsNotNone(times[0])
+        self.assertTrue(all(t is times[0] for t in times))
+
+    def test_copies_stop_at_the_limit(self):
+        self.assertEqual(self.print(layout(), [{}], copies=5000).get_json()["labels"], server.MAX_COPIES)
+
 
 class DataFiles(ApiTest):
 
@@ -157,6 +259,18 @@ class DataFiles(ApiTest):
     def test_rows_and_headers(self):
         out = self.upload("parts.csv", b"code, \nA1,Bolt\n,\n").get_json()
         self.assertEqual(out, {"headers": ["code", "Column 2"], "rows": [{"code": "A1", "Column 2": "Bolt"}]})
+
+    def test_repeated_column_names_are_numbered(self):
+        # Rows are kept by column name: the second "name" used to replace the
+        # first without a word. Field names ignore case, so "Code" repeats "code".
+        out = self.upload("parts.csv", b"name,code,name,Code,name\nBolt,1,Nut,2,Washer\n").get_json()
+        self.assertEqual(out["headers"], ["name", "code", "name (2)", "Code (2)", "name (3)"])
+        self.assertEqual(out["rows"], [{"name": "Bolt", "code": "1", "name (2)": "Nut", "Code (2)": "2",
+                                        "name (3)": "Washer"}])
+
+    def test_a_numbered_name_avoids_one_already_there(self):
+        self.assertEqual(server.unique_headers(["a", "a (2)", "A", "", "column 4"]),
+                         ["a", "a (2)", "A (3)", "Column 4", "column 4 (2)"])
 
     def test_no_file(self):
         self.assertEqual(self.client.post("/api/data").status_code, 400)
@@ -204,20 +318,74 @@ class Templates(ApiTest):
 
     def put(self, name, tpl=None):
         # Encoded the way the editor sends it, so ? # % reach the server
-        return self.client.put("/api/templates/" + quote(name, safe=""), json=tpl or {})
+        return self.client.put("/api/templates/" + quote(name, safe=""), json=tpl or self.tpl(0))
+
+    @staticmethod
+    def tpl(v):
+        """A small template, told from another by its fixed value."""
+        return {"layout": layout(), "fixed": {"v": str(v)}}
 
     def test_saving_over_a_template_needs_replace(self):
-        self.client.put("/api/templates/Mine", json={"v": 1})
-        resp = self.client.put("/api/templates/Mine", json={"v": 2})
+        self.client.put("/api/templates/Mine", json=self.tpl(1))
+        resp = self.client.put("/api/templates/Mine", json=self.tpl(2))
         self.assertEqual(resp.status_code, 409)
-        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 1})
-        self.assertEqual(self.client.put("/api/templates/Mine?replace=1", json={"v": 2}).get_json(), {"ok": True})
-        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 2})
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), self.tpl(1))
+        self.assertEqual(self.client.put("/api/templates/Mine?replace=1", json=self.tpl(2)).get_json(), {"ok": True})
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), self.tpl(2))
 
     def test_a_refused_body_leaves_the_template_alone(self):
-        self.client.put("/api/templates/Mine", json={"v": 1})
+        self.client.put("/api/templates/Mine", json=self.tpl(1))
         self.assertEqual(self.client.put("/api/templates/Mine?replace=1", json=[1]).status_code, 400)
-        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), {"v": 1})
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), self.tpl(1))
+
+    def test_only_templates_are_saved(self):
+        cases = {
+            "it has no layout": [{}, {"v": 1}, {"layout": [1]}, {"layout": "x"}],
+            "its elements aren't a list": [{"layout": {"elements": "x"}}, {"layout": {"elements": [TITLE, 5]}}],
+            "its fixed values can't be read": [{"layout": layout(), "fixed": [1]}],
+            "its column choices can't be read": [{"layout": layout(), "mapping": "x"}],
+        }
+        for fault, bodies in cases.items():
+            for tpl in bodies:
+                with self.subTest(tpl=tpl):
+                    resp = self.client.put("/api/templates/Mine", json=tpl)
+                    self.assertEqual((resp.status_code, resp.get_json()),
+                                     (400, {"error": f"That isn't a template: {fault}"}))
+        self.assertEqual(self.saved(), [])
+        # A layout alone is enough, with or without elements
+        self.assertEqual(self.client.put("/api/templates/Mine", json={"layout": {"tape": "62"}}).status_code, 200)
+
+    def test_a_damaged_template_file_says_so(self):
+        folder = os.path.join(self.data, "templates")
+        files = {
+            "Cut short": (b'{"layout": {"tape": "62red", "elem', "That template's file is damaged and can't be opened"),
+            "Not text": (b"\xff\xfe\x00\x01", "That template's file is damaged and can't be opened"),
+            "A list": (b"[1]", "That template can't be opened: it has no layout"),
+        }
+        for name, (raw, msg) in files.items():
+            with self.subTest(name):
+                with open(os.path.join(folder, name + ".json"), "wb") as f:
+                    f.write(raw)
+                resp = self.client.get("/api/templates/" + quote(name))
+                self.assertEqual((resp.status_code, resp.get_json()), (422, {"error": msg}))
+
+    def test_a_save_that_fails_leaves_the_template_whole(self):
+        # As when the drive fills up or is pulled out partway through writing
+        self.client.put("/api/templates/Mine", json=self.tpl(1))
+
+        def cut_short(data, f, **options):
+            f.write('{"layout": {"ta')
+            raise OSError(28, "No space left on device")
+
+        with mock.patch.object(server.json, "dump", cut_short):
+            resp = self.client.put("/api/templates/Mine?replace=1", json=self.tpl(2))
+            self.assertEqual((resp.status_code, resp.get_json()),
+                             (500, {"error": "Couldn't save it: No space left on device"}))
+            resp = self.post("/api/config", {"printer_host": "192.168.1.50"})
+            self.assertEqual(resp.status_code, 500)
+        self.assertEqual(self.client.get("/api/templates/Mine").get_json(), self.tpl(1))
+        self.assertEqual(self.saved(), ["Mine.json"])   # and no part-written file beside it
+        self.assertEqual(os.listdir(self.data), ["templates"])
 
     def test_names_are_used_as_typed(self):
         for name in ("Bin label!", "Étiquette #2 (red)", "50% off", "x" * server.MAX_NAME):

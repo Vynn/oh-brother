@@ -3,8 +3,10 @@ tapes.py, and reference images of every element type and option on the main
 kinds of tape."""
 
 import base64
+import datetime
 import io
 import unittest
+from unittest import mock
 
 from PIL import Image, ImageDraw
 
@@ -200,6 +202,41 @@ class Elements(unittest.TestCase):
         self.assertEqual(colours(img), {WHITE})
         self.assertEqual((warnings, blank), ([], []))
 
+    def test_qr_code_with_too_much_data_is_blank(self):
+        img, warnings, blank = self.draw(qr(0, 0, 20, data="x" * 4000))
+        self.assertEqual(colours(img), {WHITE})
+        self.assertEqual(blank, [{"i": 0, "type": "qr", "why": "invalid"}])
+        self.assertEqual(warnings, ["QR code can't hold this much data (4000 characters); shorten it"])
+
+    def test_a_box_far_larger_than_the_label_is_cut_down(self):
+        # A width of 5000 typed by mistake once asked for gigabytes of memory.
+        # What's on the label is drawn as before; the rest never printed.
+        huge = "An element is far larger than the label; only part of it is drawn"
+        with mock.patch.object(render.Image, "new", wraps=Image.new) as new:
+            img, warnings, _ = self.draw(box(-5, -5, 5000, 5000), box(0, 0, 9000, 1, color="red"))
+        self.assertEqual(warnings, [huge])
+        self.assertEqual(colours(img), {BLACK, RED})   # the label is covered
+        W, H = img.size
+        for call in new.call_args_list:   # the label, then each element's mask
+            w, h = call.args[1]
+            self.assertLessEqual(w, render.MAX_BOX * W)
+            self.assertLessEqual(h, render.MAX_BOX * H)
+        # Just under twice the label's size each way draws in full, and says nothing
+        self.assertEqual(self.draw(box(-29, -15, 116, 59))[1], [])
+
+    def test_text_size_has_a_limit(self):
+        for el in (text(0, 0, 50, 20, "A", size=1e7), text(0, 0, 50, 20, "A", max_size=1e7)):
+            with self.subTest(el=el), mock.patch.object(render, "_font", wraps=render._font) as font:
+                self.draw(el)
+                self.assertLessEqual(max(call.args[2] for call in font.call_args_list), render.MAX_FONT_PX)
+
+    def test_one_date_and_time_for_every_element(self):
+        # Asked for once, so a label can't show two times when the minute turns
+        stamp = text(0, 0, 50, 8, "{{time}}")
+        with mock.patch.object(render.datetime, "datetime", wraps=datetime.datetime) as clock:
+            self.draw(stamp, {**stamp, "y": 10}, qr(40, 12, 12, data="{{datetime}}"))
+        self.assertEqual(clock.now.call_count, 1)
+
 
 class Images(unittest.TestCase):
 
@@ -282,6 +319,13 @@ class Canvas(unittest.TestCase):
         # Die-cut labels have a fixed size, whatever length is asked for
         self.assertEqual(tapes.canvas_dots(layout(tape="29x90", length=5)),
                          tapes.canvas_dots(layout(tape="29x90", length=500)))
+
+    def test_length_is_held_to_the_editors_limits(self):
+        dpmm = tapes.DPMM
+        self.assertEqual(tapes.canvas_dots(layout(length=1))[1], round(tapes.MIN_LENGTH_MM * dpmm))
+        self.assertEqual(tapes.canvas_dots(layout(length=1e9))[1], round(tapes.MAX_LENGTH_MM * dpmm))
+        for length in (tapes.MIN_LENGTH_MM, 123.4, tapes.MAX_LENGTH_MM):   # within them, as asked
+            self.assertEqual(tapes.canvas_dots(layout(length=length))[1], round(length * dpmm))
 
     def test_landscape_is_turned_for_the_printer(self):
         lay = layout(box(0, 0, 5, 5), length=40, orientation="landscape")

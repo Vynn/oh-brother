@@ -1,6 +1,7 @@
 """Flask backend. Its only state is the config and templates in the data
 folder, and the count of open editor pages."""
 
+import datetime
 import io
 import json
 import os
@@ -28,6 +29,7 @@ MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}   # names this machine is reached by without --lan
+MAX_COPIES = 100   # of each label in one job; the editor is sent this (/api/meta)
 
 # Template names become file names, so they follow the rules of Windows, macOS
 # and Linux together. Names that break them are refused, not changed.
@@ -64,6 +66,131 @@ class Presence:
             if not self.seen or self.count or self.idle_since is None:
                 return 0
             return time.monotonic() - self.idle_since
+
+
+def reason(e):
+    """An error's message, or its name when it has none (as some of brother_ql's)."""
+    return str(e) or type(e).__name__
+
+
+def write_json(path, data):
+    """Write a JSON file so that it's the old one or the new one, never part of one.
+
+    It's written beside the file under another name, then moved into place.
+    A drive pulled out or filled up partway leaves the file as it was, where
+    writing over it would have left it cut short.
+    """
+    tmp = path + ".tmp"   # not ".json", so a leftover is never listed as a template
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def clean_setting(key, value):
+    """A printer setting, tidied, or ValueError with the reason for the user."""
+    if key == "printer_host":
+        if not isinstance(value, str):
+            raise ValueError("The printer's address must be text")
+        value = value.strip()
+        if len(value) > 253 or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("That isn't a printer address: use its IP address or host name")
+        return value
+    if key == "printer_port":
+        try:
+            if isinstance(value, bool) or not isinstance(value, (int, str)):
+                raise ValueError
+            port = int(value)
+        except ValueError:
+            port = 0
+        if not 1 <= port <= 65535:
+            raise ValueError("The port must be a number from 1 to 65535")
+        return port
+    if value not in MODELS:   # key == "model"
+        raise ValueError("Choose one of these printer models: " + ", ".join(MODELS))
+    return value
+
+
+def template_fault(data):
+    """Why saved data can't be used as a template, or None if it can.
+
+    A template holds a layout, and may hold fixed values and a column mapping.
+    """
+    if not isinstance(data, dict) or not isinstance(data.get("layout"), dict):
+        return "it has no layout"
+    elements = data["layout"].get("elements", [])
+    if not isinstance(elements, list) or not all(isinstance(e, dict) for e in elements):
+        return "its elements aren't a list"
+    for key, name in (("fixed", "fixed values"), ("mapping", "column choices")):
+        if not isinstance(data.get(key, {}), dict):
+            return f"its {name} can't be read"
+    return None
+
+
+def unique_headers(row):
+    """Column names from a data file's first row, no two the same.
+
+    An empty name becomes "Column 3". A name that repeats an earlier one
+    becomes "name (2)": rows are kept by column name, so the second "name"
+    column used to replace the first without a word. Field names ignore case,
+    so "Code" after "code" counts as a repeat too.
+    """
+    out, used = [], set()
+    for i, h in enumerate(row):
+        base = h.strip() or f"Column {i + 1}"
+        name, n = base, 1
+        while name.lower() in used:
+            n += 1
+            name = f"{base} ({n})"
+        used.add(name.lower())
+        out.append(name)
+    return out
+
+
+class RowError(Exception):
+    """A label that couldn't be drawn, with a message naming its row."""
+
+
+class Labels:
+    """A print job's labels, each drawn when printer.build_job() reaches it.
+
+    A job used to draw every label before converting any, holding 0.74 MB for
+    each 62 x 30 mm label: 3.7 GB for 5,000 rows. Now one label's image exists
+    at a time. The warnings and blank lists are complete once the job is built.
+    `rows` are the records' row numbers in the data file, for error messages.
+    """
+
+    def __init__(self, layout, records, copies, chain, now, rows=None):
+        self.layout, self.records, self.copies = layout, records, copies
+        self.chain, self.now, self.rows = chain, now, rows
+        self.warnings, self.blanks = [], []
+
+    def __len__(self):
+        return len(self.records) * self.copies
+
+    def where(self, n):
+        if self.rows:
+            return f" on row {self.rows[n]}"
+        return f" on label {n + 1}" if len(self.records) > 1 else ""
+
+    def __iter__(self):
+        for n, rec in enumerate(self.records):
+            try:
+                img, w, blank = render.render(self.layout, rec, keep_missing=False, chain=self.chain, now=self.now)
+            except Exception as e:   # as for the preview: a record the layout can't take
+                raise RowError(f"Rendering failed{self.where(n)}: {reason(e)}") from e
+            self.warnings += [x for x in w if x not in self.warnings]
+            self.blanks.append(blank)
+            for _ in range(self.copies):
+                yield img
 
 
 BLANK_NAMES = {"qr": "QR code", "barcode": "Barcode", "image": "Image"}
@@ -106,13 +233,29 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     app.presence = Presence()
 
     def load_config():
+        # Whatever config.json holds, the settings that come back are usable:
+        # a file that's missing, damaged or not an object gives the defaults,
+        # and so does any one setting with a value that can't be used.
         cfg = dict(DEFAULT_CONFIG)
         try:
             with open(cfg_path, encoding="utf-8") as f:
-                cfg.update(json.load(f))
+                saved = json.load(f)
         except (OSError, ValueError):
-            pass
+            saved = None
+        if isinstance(saved, dict):
+            for k in DEFAULT_CONFIG:
+                if k in saved:
+                    try:
+                        cfg[k] = clean_setting(k, saved[k])
+                    except ValueError:
+                        pass
         return cfg
+
+    def save_json(path, data):
+        try:
+            write_json(path, data)
+        except OSError as e:   # a full or read-only drive
+            abort(500, f"Couldn't save it: {e.strerror or e}")
 
     def tpl_path(name, folder=tpl_dir):
         name = name.strip()
@@ -137,15 +280,27 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     def read_tpl(path):
         try:
             with open(path, encoding="utf-8") as f:
-                return jsonify(json.load(f))
+                data = json.load(f)
         except OSError:
             abort(404, "No template by that name")
+        except ValueError:   # not JSON, or not text at all
+            abort(422, "That template's file is damaged and can't be opened")
+        fault = template_fault(data)
+        if fault:
+            abort(422, f"That template can't be opened: {fault}")
+        return jsonify(data)
 
     def body():
         data = request.get_json(silent=True)   # guard() has made sure it's sent as JSON
         if not isinstance(data, dict):
             abort(400, "Expected a JSON object")
         return data
+
+    def layout_of(b):
+        layout = b.get("layout", {})
+        if not isinstance(layout, dict):
+            abort(400, "Expected a layout")
+        return layout
 
     # ---- requests from other sites ------------------------------------------
 
@@ -213,22 +368,27 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         cfg = load_config()
         # The field tag pattern and built-in fields, so the editor finds fields as the server
         # does, the barcode types with what each takes, and the most an image may
-        # take up, which the editor shrinks images to fit
+        # take up, which the editor shrinks images to fit; and the limits on
+        # lengths and copies, which the editor keeps to and the server enforces
         return jsonify(config=cfg, models=MODELS, tapes=tapes.tape_list(cfg["model"]),
                        fonts=list(render.FONT_FILES), dpmm=tapes.DPMM,
                        field_pattern=fields.PLACEHOLDER.pattern, builtin_fields=list(fields.BUILTINS),
                        barcodes=[{"id": k, "name": v.name, "hint": v.hint} for k, v in barcodes.KINDS.items()],
-                       image_budget=render.MAX_IMAGE_CHARS)
+                       image_budget=render.MAX_IMAGE_CHARS,
+                       limits={"length_mm": [tapes.MIN_LENGTH_MM, tapes.MAX_LENGTH_MM], "copies": MAX_COPIES})
 
     @app.post("/api/config")
     def save_config():
         cfg = load_config()
         b = body()
+        # Every setting sent is checked before any is saved
         for k in DEFAULT_CONFIG:
             if k in b:
-                cfg[k] = b[k]
-        with open(cfg_path, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
+                try:
+                    cfg[k] = clean_setting(k, b[k])
+                except ValueError as e:
+                    abort(400, str(e))
+        save_json(cfg_path, cfg)
         return jsonify(config=cfg)
 
     @app.post("/api/test")
@@ -246,11 +406,11 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         # Raw PNG (fast compression) rather than base64 JSON: this runs on
         # every drag frame. Metadata rides along in headers as URL-encoded JSON.
         b = body()
-        layout = b.get("layout", {})
+        layout = layout_of(b)
         try:
             img, warnings, blank = render.render(layout, b.get("record"), keep_missing=True, chain=set(b.get("chain") or ()))
         except Exception as e:
-            return jsonify(error=str(e)), 400
+            return jsonify(error=reason(e)), 400
         buf = io.BytesIO()
         img.save(buf, "PNG", compress_level=1)
         return Response(buf.getvalue(), mimetype="image/png", headers={
@@ -264,37 +424,46 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     def print_labels():
         b = body()
         cfg = load_config()
-        layout = b.get("layout", {})
+        layout = layout_of(b)
         records = b.get("records") or [{}]
+        if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
+            return jsonify(error="Records must be a list of objects"), 400
+        # The records' row numbers in the data file, when the editor sends them
+        rows = b.get("rows")
+        if not isinstance(rows, list) or len(rows) != len(records):
+            rows = None
         chain = set(b.get("chain") or ())   # fields whose fixed values may hold {{tags}}
         try:
-            copies = max(1, min(100, int(b.get("copies", 1))))
+            copies = max(1, min(MAX_COPIES, int(b.get("copies", 1))))
         except (TypeError, ValueError):
             return jsonify(error="Copies must be a whole number"), 400
         dry_run = bool(b.get("dry_run"))
         if not cfg["printer_host"] and not dry_run:
             return jsonify(error="Set the printer address first"), 400
 
-        images, warnings, blanks = [], [], []
+        # What's wrong with the layout itself is found here, so it isn't
+        # reported as a fault in the first row
         try:
-            for rec in records:
-                img, w, blank = render.render(layout, rec, keep_missing=False, chain=chain)
-                warnings += [x for x in w if x not in warnings]
-                images += [img] * copies
-                blanks.append(blank)
-        except Exception as e:   # as for the preview: a bad layout or record
-            return jsonify(error=f"Rendering failed: {e}"), 400
-        warnings += blank_code_warnings(blanks, copies)
-        try:
-            job = printer.build_job(layout, images, cfg["model"], cut=b.get("cut", True))
+            tapes.canvas_dots(layout)
         except Exception as e:
-            return jsonify(error=f"Conversion failed: {e}"), 400
+            return jsonify(error=f"Rendering failed: {reason(e)}"), 400
+        # One date and time for the whole job. Each label is drawn as the
+        # conversion reaches it, and the job is sent only once all are done,
+        # so an error in any row still prints nothing.
+        labels = Labels(layout, records, copies, chain, datetime.datetime.now(), rows)
+        try:
+            job = printer.build_job(layout, labels, cfg["model"], cut=b.get("cut", True))
+        except RowError as e:
+            return jsonify(error=str(e)), 400
+        except Exception as e:
+            return jsonify(error=f"Conversion failed: {reason(e)}"), 400
+        warnings = labels.warnings + blank_code_warnings(labels.blanks, copies)
         if not dry_run:
             try:
                 printer.send(cfg["printer_host"], cfg["printer_port"], job)
             except OSError as e:
                 return jsonify(error=f"Send failed: {e}"), 502
-        return jsonify(labels=len(images), bytes=len(job), warnings=warnings, dry_run=dry_run)
+        return jsonify(labels=len(labels), bytes=len(job), warnings=warnings, dry_run=dry_run)
 
     # ---- images from a web address ------------------------------------------
 
@@ -321,7 +490,7 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         rows = [r for r in rows if any(c.strip() for c in r)]
         if not rows:
             return jsonify(error="The file has no rows"), 400
-        headers = [h.strip() or f"Column {i + 1}" for i, h in enumerate(rows[0])]
+        headers = unique_headers(rows[0])
         records = [{h: (r[i] if i < len(r) else "") for i, h in enumerate(headers)} for r in rows[1:]]
         return jsonify(headers=headers, rows=records)
 
@@ -345,12 +514,14 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
 
     @app.put("/api/templates/<path:name>")
     def put_template(name):
-        path, data = tpl_path(name), body()   # checked before the file is opened, which empties it
+        path, data = tpl_path(name), body()
+        fault = template_fault(data)
+        if fault:
+            abort(400, f"That isn't a template: {fault}")
         # Saving over a template takes ?replace=1, sent once the editor has asked
         if os.path.exists(path) and request.args.get("replace") != "1":
             abort(409, "A template by that name exists")
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        save_json(path, data)   # the template it replaces stays whole if this fails
         return jsonify(ok=True)
 
     @app.delete("/api/templates/<path:name>")

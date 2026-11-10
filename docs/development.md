@@ -146,6 +146,13 @@ Templates are JSON files in `data/templates/`, named after the template, and sam
 
 The README images are taken in the Claude desktop app's browser, from a separate instance with its own data folder and the placeholder printer address `192.168.1.50`. Real printer addresses and personal data must not appear in them.
 
+To retake them:
+
+1. Start a separate instance with its own port and data folder, such as `sh run.sh --no-browser --port 8630 --data <folder>`, and give it the printer address `192.168.1.50`. `.claude/launch.json` has one as `oh-brother-demo`.
+2. Set the browser pane's viewport to 1200 × 720, so the three columns and the data rows fit.
+3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `drawPrinterChip(true)`.
+4. Capture the whole pane as a PNG, 800 × 480, into `docs/images/`, and check each image for private details before committing.
+
 ## Commits
 
 Every commit is checked for personal details: names, home paths, IP addresses, hostnames and addresses. Item names in templates and samples are fine. Commit messages are short prose paragraphs.

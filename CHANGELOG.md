@@ -2,6 +2,19 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.4.1 · 2026-11-10
+
+Pillow 13, new screenshots, and a note on red print density.
+
+### Added
+
+- The README says where red's print density is set: on the printer, not in the app, under *Menu* → *Settings* → *Print Density (2 colors)* → *Color 2 (Red)*. Raising it to +2 made red print evenly on the test printer. The printer checklist gains a check for even red.
+
+### Changed
+
+- Pillow is 13.0.0, up from 12.3.0. Labels print exactly as before: every reference image and print job comes out byte for byte the same, on all four platforms.
+- The README's screenshots are retaken for 0.4, wider so the data rows are readable, and a third shows the layered shelf tag.
+
 ## 0.4.0 · 2026-11-04
 
 Images, a layered shelf tag, and retail barcodes.

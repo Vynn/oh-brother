@@ -75,8 +75,12 @@ def encode(kind_id, data):
             return Code(kind, pybarcode.get(kind_id, data).build()[0], data)
         except Exception as e:   # python-barcode raises several kinds for data it can't take
             raise BarcodeError(str(e)) from None
-    digits = "".join(c for c in data if c not in " -")   # as printed: 978-3-16-148410-0
-    if not digits.isdigit():
+    # Spaces and hyphens go, as printed: 978-3-16-148410-0. Digits typed in
+    # another script (full-width １２３, Arabic-Indic ١٢٣) are the same numbers,
+    # so they become 0-9. Characters that only look like digits, such as ², are
+    # refused below: isdecimal() is false for them, where isdigit() is true.
+    digits = "".join(str(int(c)) if c.isdecimal() else c for c in data if c not in " -")
+    if not digits.isdecimal():
         raise BarcodeError(f"{kind.name} takes digits only")
     if len(digits) != kind.digits:
         msg = f"{kind.name} needs {kind.digits} digits, with the check digit; this has {len(digits)}"

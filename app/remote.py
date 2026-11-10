@@ -139,10 +139,14 @@ def fetch_image(url):
     deadline = time.monotonic() + TIMEOUT_S
     try:
         with opener.open(req, timeout=TIMEOUT_S) as resp:
-            if int(resp.headers.get("Content-Length") or 0) > MAX_BYTES:
+            length = (resp.headers.get("Content-Length") or "").strip()
+            if length.isascii() and length.isdigit() and int(length) > MAX_BYTES:   # a length that isn't a number is ignored
                 raise FetchError(f"It's over {MAX_BYTES // 1024 // 1024} MB")
             chunks, size = [], 0
-            while chunk := resp.read(65536):
+            # read1() gives what has arrived, where read() waits for the full
+            # 64 KB: a site sending a byte at a time would otherwise never
+            # reach the deadline check below.
+            while chunk := resp.read1(65536):
                 size += len(chunk)
                 if size > MAX_BYTES:
                     raise FetchError(f"It's over {MAX_BYTES // 1024 // 1024} MB")

@@ -5,6 +5,9 @@ from brother_ql.labels import ALL_LABELS, FormFactor
 
 DPI = 300
 DPMM = DPI / 25.4
+# A continuous label's length. The editor is sent these limits (/api/meta) and
+# keeps to them; a layout from anywhere else is held to them when it's drawn.
+MIN_LENGTH_MM, MAX_LENGTH_MM = 5, 1000
 
 
 def tape_list(model="QL-820NWB"):
@@ -54,7 +57,8 @@ def canvas_dots(layout):
     lbl = label(layout.get("tape", "62red"))
     w, h = lbl.dots_printable
     if lbl.form_factor == FormFactor.ENDLESS:
-        h = max(1, round(float(layout.get("length_mm", 50)) * DPMM))
+        length = max(MIN_LENGTH_MM, min(MAX_LENGTH_MM, float(layout.get("length_mm", 50))))
+        h = round(length * DPMM)
     if layout.get("orientation") == "landscape":
         w, h = h, w
     return w, h

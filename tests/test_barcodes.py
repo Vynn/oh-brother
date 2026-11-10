@@ -54,6 +54,21 @@ class CheckDigits(unittest.TestCase):
                 barcodes.encode(kind, "40063813A3931")
             self.assertIn("takes digits only", str(cm.exception))
 
+    def test_digits_in_other_scripts_are_the_same_numbers(self):
+        # Full-width, as a Japanese keyboard types them, and Arabic-Indic
+        plain = barcodes.encode("ean13", GOOD["ean13"])
+        for digits in ("４００６３８１３３３９３１", "٤٠٠٦٣٨١٣٣٣٩٣١", "４００６-３８１３ 33931"):
+            with self.subTest(digits):
+                code = barcodes.encode("ean13", digits)
+                self.assertEqual((code.modules, code.text), (plain.modules, GOOD["ean13"]))
+
+    def test_characters_that_only_look_like_digits_are_refused(self):
+        # str.isdigit() is true for ² and ①, which int() can't read: this was an unhandled error
+        for data in ("40063²1333931", "400638133393①"):
+            with self.subTest(data), self.assertRaises(barcodes.BarcodeError) as cm:
+                barcodes.encode("ean13", data)
+            self.assertEqual(str(cm.exception), "EAN-13 takes digits only")
+
     def test_spaces_and_hyphens_are_ignored(self):
         self.assertEqual(barcodes.encode("ean13", "978-3-16-148410-0").text, "9783161484100")
         self.assertEqual(barcodes.encode("upca", "0 36000 29145 2").text, "036000291452")

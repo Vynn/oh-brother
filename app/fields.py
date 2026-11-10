@@ -27,7 +27,7 @@ def placeholders(layout):
     return seen
 
 
-def fill(template, record, keep_missing, chain=(), warnings=None):
+def fill(template, record, keep_missing, chain=(), warnings=None, now=None):
     """Replace {{Name}} with the record's value, or else a built-in date or time.
 
     Values of the fields named in `chain` (fixed text typed by the user) may
@@ -36,11 +36,13 @@ def fill(template, record, keep_missing, chain=(), warnings=None):
     field that refers back to itself, directly or through others, is reported
     and, with keep_missing (the preview), left as its tag.
     Names are case-insensitive: {{Code}}, {{code}} and {{CODE}} are one field.
+    `now` is the date and time the built-in fields show: a print job passes
+    one for all its labels, so none differs when the minute turns partway.
     """
     # Later keys win, so the record's fields override same-named data columns
     record = {str(k).lower(): v for k, v in record.items()}
     chain = {str(c).lower() for c in chain}
-    now = datetime.datetime.now()
+    now = now or datetime.datetime.now()
     builtins = {k: now.strftime(f) for k, f in BUILTINS.items()}
 
     def expand(text, path):
@@ -91,7 +93,7 @@ def _tidy_empty(m):
     return " " if ls and rsp else ""   # a single space stays between words
 
 
-def fill_text(template, record, keep_missing, chain=(), warnings=None):
+def fill_text(template, record, keep_missing, chain=(), warnings=None, now=None):
     """Fill a text element. Returns (text, hide).
 
     Tidies up after empty fields: spaces beside one are dropped (a single
@@ -111,7 +113,7 @@ def fill_text(template, record, keep_missing, chain=(), warnings=None):
 
         def one(m):
             nonlocal filled
-            v = fill(m.group(0), record, keep_missing, chain, warnings)
+            v = fill(m.group(0), record, keep_missing, chain, warnings, now)
             filled = filled or v != ""
             return v if v != "" else EMPTY
 

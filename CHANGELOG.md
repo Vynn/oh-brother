@@ -2,6 +2,37 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.4.2 · 2026-11-10
+
+Large print jobs that stay quick, a question before a big one, and fixes from a review of the code.
+
+### Added
+
+- Printing more than 25 labels asks first. Loading a data file ticks every row, so one click could send the whole file to the printer.
+- A print error names the row it happened on, as numbered in the Data table, rather than only "Rendering failed".
+
+### Changed
+
+- Large print jobs are quicker and need far less memory. brother_ql copied the whole job each time it added to it, so each label took longer than the one before, and converting 400 took 9 to 27 s from one run to the next. A label now takes about 9 ms to draw and convert however long the job, so 400 are ready in under 4 s. Labels are also drawn one at a time as the job is built, where all were drawn first: 5,000 labels of 62 × 30 mm needed about 3.7 GB. The jobs are byte for byte the same.
+- Column names that repeat in a data file are numbered: a second `name` becomes `name (2)`. Rows are kept by column name, so the second column used to replace the first without a word. Names that differ only in case count as repeats, as field names ignore case.
+- Retail barcodes take digits typed in another script, such as full-width １２３ or Arabic-Indic ١٢٣, as the same numbers. They used to be refused with a check digit message that made no sense.
+- Printer settings are checked when saved: the port must be a number from 1 to 65535 and the model one of those listed, and the dialog says what's wrong. A settings file that can't be read, or holds a value that can't be used, falls back to the defaults; it could stop the editor from loading.
+- Templates and settings are written to a new file, which is then moved into place. A drive that fills up or is pulled out partway through a save leaves the old file whole, where it used to be left cut short.
+- Only a template can be saved as one: it needs a layout. A template file that's damaged says so when opened, and one with pieces missing opens with them filled in.
+- `{{date}}`, `{{time}}` and `{{datetime}}` are read once for a whole print job, so labels printed as the minute turns all show the same time.
+- *Copies* shows the number that will be used, a whole number from 1 to 100. The button used to count labels the app wouldn't print.
+- The app holds a continuous label to 5–1000 mm, an element's box to twice the label's size and text to 720 pt, whatever a template asks for. The editor already kept lengths to these; a width of 5000 typed by mistake could ask for gigabytes of memory.
+
+### Fixed
+
+- A QR code with more data than a QR code can hold replaced the whole preview with "Invalid version (was 41, expected 1 to 40)", and stopped a print job. It's now left blank and marked, with a warning, as a barcode with bad data is.
+- A character that only looks like a digit, such as ², in a retail barcode stopped the preview with an error.
+- The 10-second limit on fetching an image didn't stop a site that sent a byte at a time.
+- An image smaller than 128 px on its longer side, such as a 40 px icon, was refused with "doesn't fit in 128 KB even at 128 px". It's now used at its own size.
+- An image could land on the wrong element, or be lost with an error, when another element was selected or the image's own was deleted while it was still being read or fetched.
+- A width or height cleared or set to 0 left an element that couldn't be picked up on the label. It goes back to the smallest size once typing is done.
+- The hint in the Data panel left out `{{datetime}}`.
+
 ## 0.4.1 · 2026-11-10
 
 Pillow 13, new screenshots, and a note on red print density.

@@ -77,6 +77,22 @@ class Site(http.server.BaseHTTPRequestHandler):
         elif path == "/slow.png":
             time.sleep(remote.TIMEOUT_S + 0.5)
             self.send(200, PNG)
+        elif path == "/trickle.png":   # never silent for long, and never finished
+            self.send_response(200)
+            self.send_header("Content-Length", "1000000")
+            self.end_headers()
+            try:
+                while True:
+                    self.wfile.write(b"x")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+            except OSError:   # the app stops reading
+                pass
+        elif path == "/odd-length.png":   # a length that isn't a number
+            self.send_response(200)
+            self.send_header("Content-Length", "lots")
+            self.end_headers()
+            self.wfile.write(PNG)
         else:
             self.send(404, b"", "text/plain")
 
@@ -155,6 +171,16 @@ class Fetching(SiteTest):
     def test_too_slow(self):
         with mock.patch.object(remote, "TIMEOUT_S", 0.3):
             self.refused_with("/slow.png", "It took longer than 0.3 seconds")
+
+    def test_a_trickle_is_too_slow_too(self):
+        # A byte every so often kept the download going for as long as the site liked
+        with mock.patch.object(remote, "TIMEOUT_S", 0.3):
+            started = time.monotonic()
+            self.refused_with("/trickle.png", "It took longer than 0.3 seconds")
+            self.assertLess(time.monotonic() - started, 3)
+
+    def test_a_length_that_isnt_a_number_is_ignored(self):
+        self.assertTrue(self.fetch("/odd-length.png")["data"].startswith("data:image/png;base64,"))
 
 
 class Addresses(unittest.TestCase):

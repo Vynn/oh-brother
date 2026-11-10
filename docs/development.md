@@ -43,8 +43,8 @@ They cover the server side, against a temporary data folder:
 - **Drawing:** every element type and option, the size warnings, and canvas sizes. Thirteen layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along, images in every mode, and every barcode type.
 - **Images and barcodes:** image modes, transparency, fitting and the size limits; check digits, lengths, quiet zones, guard and bearer bars for each barcode type.
 - **Images from a web address:** fetched from a small web server on this machine: images, SVG, redirects, pages that aren't images, an entity bomb, missing, oversized, endless and slow downloads, and the address rules.
-- **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer.
-- **The API:** requests from other sites, errors, templates, the editor's page and files, and the stream that counts open pages.
+- **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer. Other tests check that a job's labels are drawn one at a time, share one date and time, and that an error names its row.
+- **The API:** requests from other sites, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
 - **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.
 
 After an intended change to what's drawn or printed, rewrite the reference files, then look at the new images before committing them:
@@ -71,7 +71,13 @@ The workflows can only read the repository and use no secrets. They use only Git
 
 The editor asks the server for a fresh preview as you work: `POST /api/render` returns the PNG itself, with URL-encoded JSON headers: `X-Warnings`, `X-Placeholders` (the layout's field names) and `X-Blank` (elements left blank, which the editor marks). Only one request is in flight at a time, so while dragging the preview updates as fast as the round trip allows.
 
-`printer.py` converts the images with brother_ql into raster commands, splitting the red and black layers for two-colour tape. brother_ql picks out red and black by testing each pixel in Python, which takes about 50 ms a label, so `printer.py` swaps in `_filtered_hsv()`, which builds the same masks with Pillow. The jobs are byte for byte the same, and a test compares the two. The job goes to port 9100 with a plain socket write. brother_ql's own network backend isn't used: it connects without a timeout, and it can't read status back over the network anyway.
+A layout can come from anywhere, so `render.py` and `tapes.py` hold it to limits of their own: a continuous label is 5 to 1000 mm long, an element's box is at most twice the label's width and height (with a warning), and text is at most 720 pt. Each element is drawn into a mask the size of its box, so without these a width of 5000 typed by mistake asked for gigabytes of memory. The limits on length and copies go to the editor in `/api/meta`, so they're defined once.
+
+`printer.py` converts the images with brother_ql into raster commands, splitting the red and black layers for two-colour tape. brother_ql picks out red and black by testing each pixel in Python, which takes about 50 ms a label, so `printer.py` swaps in `_filtered_hsv()`, which builds the same masks with Pillow. The jobs are byte for byte the same, and a test compares the two. brother_ql also builds the job in a `bytes` value, which copies the whole job every time something is added, so each label took longer than the one before. `build_job()` gives it a `bytearray`, which grows in place, and the job is again byte for byte the same.
+
+`/api/print` doesn't draw the labels first. It hands `build_job()` a `Labels` object, which draws each label when brother_ql reaches it, so one label's image is in memory at a time rather than all of them. brother_ql needs only the number of images and one pass through them. The warnings are complete once the job is built, and the job is sent only then, so an error in any row prints nothing. The error names the row, from the row numbers the editor sends with the records. Every label of a job gets the same date and time for the built-in fields.
+
+The job goes to port 9100 with a plain socket write. brother_ql's own network backend isn't used: it connects without a timeout, and it can't read status back over the network anyway.
 
 ## Launching and stopping
 
@@ -104,14 +110,14 @@ Retail codes must be given in full, check digit included. python-barcode would q
 
 - **The address:** trimmed, at most 2048 characters, with no spaces or control characters. Only `http` and `https`, with a host, and with no user name or password.
 - **Where it points:** the host is looked up first, and this machine (`127.0.0.1`, `::1`, `0.0.0.0`) and link-local addresses (`169.254.0.0/16`, `fe80::/10`) are refused. So are multicast addresses. Each redirect, at most five, is checked the same way. Ordinary network addresses are allowed, for a logo on a NAS, say. A name whose answer changes between the check and the download could still get past, which is acceptable for a home tool.
-- **The download:** at most 10 MB, within 10 seconds, with no proxy.
+- **The download:** at most 10 MB, within 10 seconds, with no proxy. Both are checked as each piece arrives, so a site that sends a byte at a time is stopped too.
 - **What comes back:** only an image. It must be a PNG, JPEG, WebP or GIF that Pillow can open, or XML whose root is `<svg>`; the type the site claims is ignored. Python's XML parser refuses entity bombs and fetches nothing, and the browser draws SVGs as images, so scripts in them don't run.
 
 The tests serve their images from a small web server on this machine, so they allow this machine's addresses while they run, and check separately that the app refuses them.
 
 ## Data files
 
-`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is `POST /api/data`.
+`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is `POST /api/data`. It takes the column names from the first row and makes each one different from the rest (`server.unique_headers()`): an empty name becomes `Column 3`, and a name that repeats an earlier one, ignoring case, becomes `name (2)`. Rows are sent to the editor by column name, so two columns with one name would otherwise be one.
 
 
 ## Editor geometry
@@ -140,7 +146,15 @@ The editor finds fields with the server's own tag pattern and list of built-in f
 
 Templates are JSON files in `data/templates/`, named after the template, and samples are read the same way from `samples/templates/`. A name must work as a file name on Windows, macOS and Linux, so `tpl_path()` refuses one rather than changing it: `/ \ : * ? " < > |` and control characters, a dot at either end, Windows device names such as `CON` (with any extension), or more than 60 characters. The routes take the name as a path, so a name with a slash gets that message rather than a 404.
 
-`PUT /api/templates/<name>` won't replace an existing file (409) unless sent with `?replace=1`, which the editor adds once the user has confirmed. The check is made on the server, so a template saved from another window counts. On macOS and Windows, names that differ only in case are the same file, so they count as existing too. The body is checked before the file is opened, since opening it for writing empties it.
+`PUT /api/templates/<name>` won't replace an existing file (409) unless sent with `?replace=1`, which the editor adds once the user has confirmed. The check is made on the server, so a template saved from another window counts. On macOS and Windows, names that differ only in case are the same file, so they count as existing too.
+
+Only a template is saved as one: `template_fault()` wants a layout, with a list of elements if it has any, and fixed values and a column mapping that are objects. The same check runs when a template is opened, so a file that's damaged or isn't a template gets a message (422) rather than breaking the editor. The editor then fills in whatever a layout leaves out (`tidyLayout()` in `app.js`), as it does for the layout it keeps in the browser.
+
+Templates and settings are saved by `write_json()`, which writes a new file beside the old one and moves it into place. The old file stays whole if the drive fills up or is pulled out partway.
+
+## Settings
+
+`data/config.json` holds the printer's address, port and model. `POST /api/config` checks each one (`clean_setting()`) and refuses what can't be used, and the settings dialog shows why. Reading is forgiving instead: a file that's missing, damaged or not an object gives the defaults, and so does any one setting with a bad value, so the editor always loads.
 
 ## Screenshots
 

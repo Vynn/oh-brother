@@ -38,6 +38,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] A layered shelf tag quick layout, with a slot for a logo or symbol
 - [x] Retail barcodes: EAN-13, EAN-8, UPC-A and ITF-14, with their check digits checked, and quiet zones kept for every barcode
 - [x] Pillow 13, new screenshots, and a note on setting red's print density (shipped in 0.4.1)
+- [x] Large print jobs that stay quick and light on memory, a question before printing more than 25 labels, and saves that can't leave a file cut short (shipped in 0.4.2)
 
 ## Under consideration
 

@@ -61,12 +61,13 @@ jobs:
           path: ${{ runner.temp }}/oh-brother-tests
           if-no-files-found: ignore
 
-  # Mistakes that the tests wouldn't run into: a name used but never defined,
-  # an import left behind, a slip in a shell script, or editor code a browser
-  # couldn't read. The runner comes with shellcheck and Node; pyflakes is
-  # fetched, pinned and checked like the app's own packages.
+  # The editor's own tests, and mistakes that tests wouldn't run into: a name
+  # used but never defined, an import left behind, a slip in a shell script,
+  # or editor code a browser couldn't read. The runner comes with shellcheck
+  # and Node; pyflakes is fetched, pinned and checked like the app's own
+  # packages.
   lint:
-    name: Lint
+    name: Lint and editor tests
     if: ${{ !inputs.newest }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -78,8 +79,12 @@ jobs:
       - name: Shell scripts
         run: shellcheck build.sh run.sh test.sh
 
+      # Each file is read as a module, as a browser reads it. The tests are
+      # the ones the app serves at /tests/editor/ when started with --tests.
       - name: Editor code
-        run: node --check app/static/app.js
+        run: |
+          for f in app/static/*.mjs tests/editor/*.mjs; do node --check "$f"; done
+          node tests/editor/run.mjs
 
       # With the app's own Python, so the code is read as the version it runs on
       - name: Build

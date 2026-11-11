@@ -11,6 +11,7 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 - The editor's page says what it may load, in a Content-Security-Policy: its own script and stylesheet and nothing from elsewhere. No other site can show the editor inside its own page, where a click meant for that page could land on Print.
 - Requests to the app from a page on another site are refused when the browser says that's where they come from. This adds to the checks already there, and covers the data upload, which they left open. Browsers say so only to this computer's own address, so it does nothing for `--lan`.
 - Continuous integration checks the shell scripts with shellcheck, the editor's code with Node and the Python with pyflakes, as well as running the tests.
+- The editor's code is split into modules, and the parts that need no page have tests of their own: 73, covering snapping while moving and resizing, every quick layout on every tape, fields and records, undo, image sizes and print counts. They run in a browser, on a page the app serves when started with `--tests`, and under Node in CI. The editor works as before.
 
 ## 0.4.2 · 2026-11-10
 

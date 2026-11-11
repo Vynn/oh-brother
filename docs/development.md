@@ -1,6 +1,6 @@
 # Development
 
-The app is plain Python with a plain HTML, CSS and JavaScript front end. There's no front-end build step. `build.sh` only fetches the Python runtime and packages.
+The app is plain Python with a plain HTML, CSS and JavaScript front end. The JavaScript is a handful of modules that the browser loads as they are: there's no front-end build step, and nothing from npm. `build.sh` only fetches the Python runtime and packages.
 
 ## Layout
 
@@ -8,7 +8,9 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 |---|---|---|
 | `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
 | `requirements*.txt` | The packages and their checksums: the app's, the build tool's and CI's | Yes |
+| `app/static/` | The editor: `index.html`, `style.css`, and its code in `.mjs` modules | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
+| `tests/editor/` | The editor's own tests, and the page and the Node script that run them | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
@@ -75,13 +77,37 @@ UPDATE_REFERENCES=1 sh test.sh
 
 When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
 
-The editor in `app/static/` has no tests yet; it would need a browser to drive it. What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
+### The editor's tests
+
+The editor's code is split by what needs a page and what doesn't. `app.mjs` is the page: it holds the state, draws the panels, and handles the mouse and keyboard. The modules beside it work only on the values they're given, so they can be tested anywhere:
+
+| Module | Holds |
+|---|---|
+| `units.mjs` | Millimetres and inches, rounding, the snap grid |
+| `geometry.mjs` | Label sizes, snapping while moving and resizing, align, distribute, rescaling |
+| `layouts.mjs` | Element defaults and every quick layout |
+| `fields.mjs` | Which fields a layout has, and the record that fills them |
+| `elements.mjs` | Making a layout safe to edit; removing, reordering and duplicating elements |
+| `history.mjs` | The undo list |
+| `images.mjs` | The sizes an image is tried at |
+| `job.mjs` | What a click on Print sends |
+
+Their tests are in `tests/editor/`, one `.test.mjs` file for each module, written with a small harness of its own (`harness.mjs`), so nothing is installed. Among other things they build every quick layout on every tape, across and along, and check that nothing lands off the label. They run two ways:
+
+- **In a browser.** Start the app with `sh run.sh --tests` and open `/tests/editor/`. The page lists what failed and why. The tests are served only with `--tests`.
+- **Under Node**, with `node tests/editor/run.mjs`. CI does this. Node isn't needed for anything else.
+
+`sh test.sh` doesn't run them: the bundled runtime has no JavaScript. A server-side test does check that every module the editor imports exists and that `all.mjs` lists every test file.
+
+The files end in `.mjs` so that Node reads them as modules without a `package.json`. The page itself, `app.mjs`, still has no tests: clicking through the editor after a change to it is done by hand. `window.ohBrother` gives the console the editor's state to look at, since a module's own names can't be reached from there.
+
+What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
 
 ## Continuous integration
 
 GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
 
-A second job, *Lint*, looks for mistakes the tests wouldn't run into. `shellcheck` reads the three shell scripts, `node --check` reads the editor's code as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
+A second job, *Lint and editor tests*, runs the [editor's tests](#the-editors-tests) under Node and looks for mistakes that tests wouldn't run into. `shellcheck` reads the three shell scripts, `node --check` reads each of the editor's files as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
 
 `upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones (`sh build.sh --newest`), so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
 
@@ -176,7 +202,7 @@ Templates are JSON files in `data/templates/`, named after the template, and sam
 
 `PUT /api/templates/<name>` won't replace an existing file (409) unless sent with `?replace=1`, which the editor adds once the user has confirmed. The check is made on the server, so a template saved from another window counts. On macOS and Windows, names that differ only in case are the same file, so they count as existing too.
 
-Only a template is saved as one: `template_fault()` wants a layout, with a list of elements if it has any, and fixed values and a column mapping that are objects. The same check runs when a template is opened, so a file that's damaged or isn't a template gets a message (422) rather than breaking the editor. The editor then fills in whatever a layout leaves out (`tidyLayout()` in `app.js`), as it does for the layout it keeps in the browser.
+Only a template is saved as one: `template_fault()` wants a layout, with a list of elements if it has any, and fixed values and a column mapping that are objects. The same check runs when a template is opened, so a file that's damaged or isn't a template gets a message (422) rather than breaking the editor. The editor then fills in whatever a layout leaves out (`tidyLayout()` in `elements.mjs`), as it does for the layout it keeps in the browser.
 
 Templates and settings are saved by `write_json()`, which writes a new file beside the old one and moves it into place. The old file stays whole if the drive fills up or is pulled out partway.
 
@@ -192,7 +218,7 @@ To retake them:
 
 1. Start a separate instance with its own port and data folder, such as `sh run.sh --no-browser --port 8630 --data <folder>`, and give it the printer address `192.168.1.50`. `.claude/launch.json` has one as `oh-brother-demo`.
 2. Set the browser pane's viewport to 1200 × 720, so the three columns and the data rows fit.
-3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `drawPrinterChip(true)`.
+3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `ohBrother.drawPrinterChip(true)`.
 4. Capture the whole pane as a PNG, 800 × 480, into `docs/images/`, and check each image for private details before committing.
 
 ## Commits

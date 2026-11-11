@@ -24,7 +24,10 @@ import tapes
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Sample templates and data, shipped with the app and read-only. The data
 # folder holds only the user's own templates and settings.
-SAMPLES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SAMPLES = os.path.join(ROOT, "samples")
+# The editor's own tests, served only when asked for (--tests); see create_app()
+EDITOR_TESTS = os.path.join(ROOT, "tests", "editor")
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
@@ -239,8 +242,9 @@ def is_local_host(host):
         return False
 
 
-def create_app(data_dir, lan=False, samples_dir=SAMPLES):
-    """The app. `lan`: other machines may connect, by any name for this one."""
+def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
+    """The app. `lan`: other machines may connect, by any name for this one.
+    `editor_tests`: also serve the editor's tests, as a page to open."""
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
     tpl_dir = os.path.join(data_dir, "templates")
@@ -380,6 +384,24 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     @app.get("/static/<path:p>")
     def static_files(p):
         return send_from_directory(STATIC, p)
+
+    # ---- the editor's tests, with --tests -----------------------------------
+    # The test files import the editor's modules by the path between the two
+    # folders ("../../app/static/units.mjs"), as Node needs in CI. So here
+    # both folders are served where they sit in the repository, and the same
+    # files run in a browser at /tests/editor/.
+    if editor_tests:
+        @app.get("/tests/editor/")
+        def editor_tests_page():
+            return send_from_directory(EDITOR_TESTS, "index.html")
+
+        @app.get("/tests/editor/<path:p>")
+        def editor_tests_files(p):
+            return send_from_directory(EDITOR_TESTS, p)
+
+        @app.get("/app/static/<path:p>")
+        def editor_modules(p):
+            return send_from_directory(STATIC, p)
 
     # ---- presence: lets the launcher stop once the last page closes --------
 

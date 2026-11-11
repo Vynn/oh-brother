@@ -7,7 +7,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 | Path | Contents | In the repo? |
 |---|---|---|
 | `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
-| `requirements*.txt` | The packages and their checksums: the app's and the build tool's | Yes |
+| `requirements*.txt` | The packages and their checksums: the app's, the build tool's and CI's | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
@@ -80,6 +80,8 @@ The editor in `app/static/` has no tests yet; it would need a browser to drive i
 ## Continuous integration
 
 GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
+
+A second job, *Lint*, looks for mistakes the tests wouldn't run into. `shellcheck` reads the three shell scripts, `node --check` reads the editor's code as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
 
 `upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones (`sh build.sh --newest`), so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
 
@@ -239,4 +241,4 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 
 brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.
 
-One more is fetched but never becomes part of the app: setuptools 84.2.1 (MIT), which pip uses to build packbits.
+Two more are fetched but never become part of the app: setuptools 84.2.1 (MIT), which pip uses to build packbits, and pyflakes 4.1.0 (MIT), which runs only in CI.

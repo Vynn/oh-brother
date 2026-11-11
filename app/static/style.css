@@ -276,6 +276,9 @@ table { border-collapse: collapse; }
 .props:empty { display: none; }
 .props .num4 input { padding: 0 6px; }
 .props .sub { margin-top: 4px; font-size: 11px; color: var(--faint); }
+/* A hint tucked under the field above it. A class, not a style attribute:
+   the page's Content-Security-Policy allows styles from this file only. */
+.props .sub.under { margin: -6px 0 10px; }
 
 /* ---- dialog ----------------------------------------------------------- */
 dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(440px, 92vw); box-shadow: 0 20px 60px rgba(0,0,0,.2); }

@@ -7,6 +7,9 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 ### Changed
 
 - Everything `build.sh` downloads is checked against a SHA-256 kept in the repository: the Python runtime, every package, and the tool pip uses to build one of them. A download that doesn't match stops the build. Each folder is built beside the one it replaces and swapped in when complete, so a build that fails, or runs with no network, leaves the last working one in place. It used to delete the packages first.
+- A data file may hold a million cells, counting every row as wide as the widest. A spreadsheet can name a cell in its last column on every row in a few bytes each: an Excel file under 1 MB took 2.6 GB of memory to read. Such a file is now refused before the memory is used.
+- The editor's page says what it may load, in a Content-Security-Policy: its own script and stylesheet and nothing from elsewhere. No other site can show the editor inside its own page, where a click meant for that page could land on Print.
+- Requests to the app from a page on another site are refused when the browser says that's where they come from. This adds to the checks already there, and covers the data upload, which they left open. Browsers say so only to this computer's own address, so it does nothing for `--lan`.
 
 ## 0.4.2 · 2026-11-10
 

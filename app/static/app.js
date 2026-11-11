@@ -1223,7 +1223,7 @@ function drawProps(light = false) {
   } else if (e.type === "qr") {
     kids.push(fld("Data", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
   } else if (e.type === "barcode") {
-    const hint = h("div", { class: "sub", style: "margin:-6px 0 10px" }, barcodeKind(e).hint);
+    const hint = h("div", { class: "sub under" }, barcodeKind(e).hint);
     const type = h("select", {}, ...S.meta.barcodes.map((k) => h("option", { value: k.id }, k.name)));
     type.value = barcodeKind(e).id;
     type.addEventListener("change", () => { e.symbology = type.value; hint.textContent = barcodeKind(e).hint; drawList(); schedule(); });
@@ -1250,7 +1250,7 @@ function drawProps(light = false) {
       (v) => Math.min(3, Math.max(0.5, +v || 1)));
     kids.push(h("div", { class: "row2" }, fld("Font", bind("font", font)), fld("Size (pt)", size)));
     kids.push(h("div", { class: "row2" }, fld("Max size (pt)", max), fld("Line spacing", spacing)));
-    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Size 0 = shrink to fit the box, up to Max size"));
+    kids.push(h("div", { class: "sub under" }, "Size 0 = shrink to fit the box, up to Max size"));
     kids.push(h("div", { class: "field" }, "Align", seg("align", [["left", "Left"], ["center", "Centre"], ["right", "Right"]])));
     kids.push(h("div", { class: "field" }, "Vertical", seg("valign", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]])));
     kids.push(h("div", { class: "checks" }, chk("bold", "Bold"), chk("wrap", "Wrap"), chk("invert", "Inverted")));
@@ -1271,7 +1271,7 @@ function drawProps(light = false) {
     showLevel();
     kids.push(h("div", { class: "field" }, "Black and white", mode));
     kids.push(h("label", { class: "field" }, h("span", { class: "range-label" }, "Threshold", shown), level));
-    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Threshold suits logos and line art; dither suits shading and photos."));
+    kids.push(h("div", { class: "sub under" }, "Threshold suits logos and line art; dither suits shading and photos."));
     kids.push(h("div", { class: "checks" }, chk("invert", "Inverted")));
   } else if (e.type === "rect") {
     kids.push(h("div", { class: "checks" }, chk("fill", "Filled")));

@@ -447,6 +447,59 @@ class OtherSites(ApiTest):
         self.assertEqual(client.post("/api/config", data="{}", content_type="text/plain").status_code, 415)
 
 
+    def test_api_requests_from_other_sites_are_refused(self):
+        # A browser says what kind of page a request comes from. "same-site"
+        # is another program's page on this machine, at another port.
+        for site in ("cross-site", "same-site"):
+            with self.subTest(site):
+                resp = self.client.get("/api/meta", headers={"Sec-Fetch-Site": site})
+                self.assertEqual(resp.status_code, 403)
+                self.assertEqual(resp.get_json(), {"error": "Requests from other sites aren't accepted"})
+        # The data upload is a form, which any page may send without asking
+        resp = self.client.post("/api/data", data={"file": (io.BytesIO(b"a,b\n1,2\n"), "x.csv")},
+                                content_type="multipart/form-data", headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_the_editor_and_other_programs_are_let_in(self):
+        # The editor's own page, the address bar, and anything that isn't a
+        # browser and so doesn't say
+        for site in ("same-origin", "none", None):
+            with self.subTest(site):
+                headers = {"Sec-Fetch-Site": site} if site else {}
+                self.assertEqual(self.client.get("/api/meta", headers=headers).status_code, 200)
+        # A link on another site still opens the editor
+        with self.client.get("/", headers={"Sec-Fetch-Site": "cross-site"}) as resp:
+            self.assertEqual(resp.status_code, 200)
+
+
+class PagePolicy(ApiTest):
+
+    def test_every_response_carries_the_headers(self):
+        for method, path in (("get", "/"), ("get", "/static/app.js"), ("get", "/api/meta"),
+                             ("get", "/api/nothing"), ("get", "/nothing"), ("post", "/api/render")):
+            with self.subTest(path), getattr(self.client, method)(path, json={"layout": layout(TITLE)}) as resp:
+                self.assertEqual(resp.headers["Content-Security-Policy"], server.PAGE_POLICY)
+                self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_static_files_say_what_they_are(self):
+        # With nosniff a browser goes by the type alone, and runs or applies nothing else
+        for path, kind in (("/", "text/html"), ("/static/app.js", "javascript"), ("/static/style.css", "text/css")):
+            with self.subTest(path), self.client.get(path) as resp:
+                self.assertIn(kind, resp.content_type)
+
+    def test_the_page_keeps_to_its_policy(self):
+        # The policy allows scripts and styles from the app's own files only,
+        # so the page has none written into it, and the editor adds none
+        self.assertIn("script-src 'self';", server.PAGE_POLICY)
+        self.assertIn("style-src 'self';", server.PAGE_POLICY)
+        with open(os.path.join(server.STATIC, "index.html"), encoding="utf-8") as f:
+            page = f.read()
+        self.assertNotRegex(page, r"<style|\sstyle=|<script(?![^>]*\ssrc=)|\son[a-z]+=|javascript:")
+        with open(os.path.join(server.STATIC, "app.js"), encoding="utf-8") as f:
+            script = f.read()
+        self.assertNotRegex(script, r"""\bstyle:\s*["'`]|setAttribute\(\s*["']style|\beval\(|new Function""")
+
+
 class Errors(ApiTest):
 
     def assertJsonError(self, resp, status, message=None):

@@ -40,6 +40,13 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Pillow 13, new screenshots, and a note on setting red's print density (shipped in 0.4.1)
 - [x] Large print jobs that stay quick and light on memory, a question before printing more than 25 labels, and saves that can't leave a file cut short (shipped in 0.4.2)
 
+## 0.5 · Keyboard use, editor tests and checked builds · released
+
+- [x] The editor worked from the keyboard, with copy and paste of elements
+- [x] The editor's code in modules, with tests of its own that run in a browser and in CI
+- [x] Every download the build makes checked against a checksum, and a build that fails leaves the last one working
+- [x] A policy for what the editor's page may load, requests from other sites refused, and a limit on the size of a data file
+
 ## Under consideration
 
 Not scheduled yet.
@@ -49,4 +56,3 @@ Not scheduled yet.
 - ARM Linux and macOS tried in real use (CI has built and tested them since 0.3.5)
 - Two-colour images: the black and red parts of one image printed in their own colours
 - More barcodes: UPC-E for small packages, and GS1-128 for shipping labels
-- Editor tests in a browser, with `app.js` split into modules

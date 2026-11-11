@@ -147,7 +147,8 @@
     <div class="dialog-actions">
       <button type="button" id="cfgTest">Test connection</button>
       <span class="spacer"></span>
-      <button value="cancel">Cancel</button>
+      <!-- formnovalidate: Cancel closes the dialog whatever the fields hold -->
+      <button value="cancel" formnovalidate>Cancel</button>
       <button type="button" class="primary" id="cfgSave">Save</button>
     </div>
   </form>

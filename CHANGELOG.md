@@ -20,6 +20,10 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 - Continuous integration checks the shell scripts with shellcheck, the editor's code with Node and the Python with pyflakes, as well as running the tests.
 - The editor's code is split into modules, and the parts that need no page have tests of their own: 81, covering snapping while moving and resizing, every quick layout on every tape, fields and records, undo, image sizes and print counts. They run in a browser, on a page the app serves when started with `--tests`, and under Node in CI. The editor works as before.
 
+### Fixed
+
+- *Cancel* in the printer dialog did nothing while the port held a number out of range. The browser was checking the form before closing it.
+
 ## 0.4.2 · 2026-11-10
 
 Large print jobs that stay quick, a question before a big one, and fixes from a review of the code.

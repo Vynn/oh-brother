@@ -576,6 +576,12 @@ class Pages(ApiTest):
             with self.subTest(path), self.client.get(path) as resp:
                 self.assertEqual(resp.status_code, 200)
 
+    def test_cancel_closes_the_printer_dialog_whatever_it_holds(self):
+        # Without formnovalidate the browser checks the form first, and a port
+        # out of range kept the dialog open
+        with self.client.get("/") as page:
+            self.assertIn(b'<button value="cancel" formnovalidate>Cancel</button>', page.data)
+
     def test_every_module_the_editor_imports_is_there(self):
         # A module renamed or left out stops the whole page, and only in a browser
         self.assertIn("app.mjs", editor_modules())

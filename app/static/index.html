@@ -11,11 +11,11 @@
 <header class="topbar">
   <div class="brand"><span class="brand-mark"></span>Oh-Brother</div>
   <div class="history">
-    <button class="icon" id="undoBtn" type="button" title="Undo (Ctrl+Z)" disabled>
-      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-3"/></svg>
+    <button class="icon" id="undoBtn" type="button" title="Undo (Ctrl+Z)" aria-label="Undo" disabled>
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 3.5 2.5 6.5l3 3"/><path d="M2.5 6.5h7a4 4 0 0 1 0 8h-3"/></svg>
     </button>
-    <button class="icon" id="redoBtn" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" disabled>
-      <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h3"/></svg>
+    <button class="icon" id="redoBtn" type="button" title="Redo (Ctrl+Shift+Z or Ctrl+Y)" aria-label="Redo" disabled>
+      <svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M10.5 3.5l3 3-3 3"/><path d="M13.5 6.5h-7a4 4 0 0 0 0 8h3"/></svg>
     </button>
   </div>
   <button class="printer-chip" id="printerChip" type="button">
@@ -26,7 +26,7 @@
 <main class="workspace">
 
   <!-- Left: label setup, presets, templates -->
-  <aside class="panel left">
+  <aside class="panel left" aria-label="Label, quick layouts and templates">
     <section>
       <h2>Label</h2>
       <label class="field">Tape
@@ -69,7 +69,7 @@
   </aside>
 
   <!-- Centre: preview stage, data, print -->
-  <section class="center">
+  <section class="center" aria-label="Label, data and printing">
     <div class="stage" id="stage">
       <!-- Paper at cut size; the print area inside it is the rendered canvas -->
       <div class="label-wrap" id="labelWrap">
@@ -77,14 +77,14 @@
           <img id="preview" alt="Label preview" draggable="false">
           <div class="safe" title="Printable area"></div>
           <svg class="guides" id="guides"></svg>
-          <div class="overlay" id="overlay"></div>
+          <div class="overlay" id="overlay" role="group" aria-label="Elements on the label"></div>
           <div class="marquee" id="marquee"></div>
         </div>
       </div>
     </div>
     <div class="stage-foot">
       <span id="dims" class="readout"></span>
-      <ul class="warnings" id="warnings"></ul>
+      <ul class="warnings" id="warnings" aria-live="polite" aria-label="Warnings"></ul>
     </div>
 
     <div class="data">
@@ -113,7 +113,7 @@
   </section>
 
   <!-- Right: elements and properties -->
-  <aside class="panel right">
+  <aside class="panel right" aria-label="Elements and their properties">
     <section>
       <h2>Elements</h2>
       <div class="add-row">
@@ -123,15 +123,15 @@
         <button type="button" data-add="image">+ Image</button>
         <button type="button" data-add="rect">+ Box</button>
       </div>
-      <ol class="el-list" id="elList"></ol>
+      <ol class="el-list" id="elList" aria-label="Elements, top-most first"></ol>
     </section>
     <section id="props" class="props"></section>
   </aside>
 </main>
 
-<dialog id="settings">
+<dialog id="settings" aria-labelledby="settingsTitle">
   <form method="dialog" class="dialog">
-    <h2>Printer</h2>
+    <h2 id="settingsTitle">Printer</h2>
     <div class="row2">
       <label class="field">Address (IP or hostname)
         <input type="text" id="cfgHost" placeholder="192.168.1.50" autocomplete="off">
@@ -143,7 +143,7 @@
     <label class="field">Model
       <select id="cfgModel"></select>
     </label>
-    <p class="status" id="cfgStatus"></p>
+    <p class="status" id="cfgStatus" role="status"></p>
     <div class="dialog-actions">
       <button type="button" id="cfgTest">Test connection</button>
       <span class="spacer"></span>

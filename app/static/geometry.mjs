@@ -68,10 +68,13 @@ export function moveBox(b0, dx, dy, targets, thr) {
   return { x, y, gx, gy };
 }
 
+// The least a box may be resized to, in mm: enough left to pick it up by
+export const MIN_W = 1, MIN_H = 0.5;
+
 // Resize a box that started as s0 ({l, t, r, b}) by dragging the handle hd
 // ("n", "se", …) by (dx, dy). Only the dragged edges move, each snapping on
-// its own, and the box keeps a least size of 1 x 0.5 mm. square: a QR code,
-// which stays square, anchored at the corner opposite the handle.
+// its own, and the box keeps its least size. square: a QR code, which stays
+// square, anchored at the corner opposite the handle.
 export function resizeBox(s0, hd, dx, dy, targets, thr, square = false) {
   let gx = [], gy = [];
   const edge = (v, list, guides) => {
@@ -81,10 +84,10 @@ export function resizeBox(s0, hd, dx, dy, targets, thr, square = false) {
     return snap(v);
   };
   let { l, t, r, b } = s0;
-  if (hd.includes("w")) l = Math.min(edge(l + dx, targets.xs, gx), r - 1);
-  if (hd.includes("e")) r = Math.max(edge(r + dx, targets.xs, gx), l + 1);
-  if (hd.includes("n")) t = Math.min(edge(t + dy, targets.ys, gy), b - 0.5);
-  if (hd.includes("s")) b = Math.max(edge(b + dy, targets.ys, gy), t + 0.5);
+  if (hd.includes("w")) l = Math.min(edge(l + dx, targets.xs, gx), r - MIN_W);
+  if (hd.includes("e")) r = Math.max(edge(r + dx, targets.xs, gx), l + MIN_W);
+  if (hd.includes("n")) t = Math.min(edge(t + dy, targets.ys, gy), b - MIN_H);
+  if (hd.includes("s")) b = Math.max(edge(b + dy, targets.ys, gy), t + MIN_H);
   if (square) {
     // Keep only the guides still on an edge
     const s = Math.max(r - l, b - t);
@@ -130,6 +133,16 @@ export function distribute(els, vert) {
 // Move elements by (dx, dy)
 export function nudge(els, dx, dy) {
   for (const e of els) { e.x = r2(e.x + dx); e.y = r2(e.y + dy); }
+}
+
+// Resize elements from the keyboard: each grows or shrinks by (dw, dh) at its
+// right and bottom edges, down to the least size. A QR code stays square, so
+// it takes the one change it was given.
+export function resizeBy(els, dw, dh) {
+  for (const e of els) {
+    if (e.type === "qr") e.w = e.h = r2(Math.max(MIN_W, e.w + (dw || dh)));
+    else { e.w = r2(Math.max(MIN_W, e.w + dw)); e.h = r2(Math.max(MIN_H, e.h + dh)); }
+  }
 }
 
 // Scale every element when the label changes shape, so the layout still fits

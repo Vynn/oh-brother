@@ -47,7 +47,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Drag to move. Drag a corner or edge handle to resize.
   - Edges and centres snap to the printable area's edges and centre, and to other elements, with a guide line. Otherwise they snap to a 0.5 mm grid (0.02 in when using inches). Hold Alt to place freely.
   - The align buttons place the selected element at the left, centre or right, and top, middle or bottom of the printable area.
-  - Arrow keys nudge the selection (Shift for bigger steps). Delete removes it.
+  - Arrow keys nudge the selection (Shift for bigger steps), and with Alt they resize it. Delete removes it.
   - Text size 0 shrinks the text to fit its box, up to *Max size* if one is set. *Line spacing* sets the gap between lines: 1 is normal, 1.5 is half as much again.
   - Text is laid out the same on every computer. Right-to-left text, and scripts whose letters change shape or join, such as Arabic, Hebrew or Devanagari, aren't laid out correctly.
   - Barcodes: Code 128 for any text, or the retail codes EAN-13 (ISBN-13 and JAN too), EAN-8, UPC-A and ITF-14 (outer cartons). A retail code needs every digit, check digit included, and spaces and hyphens are ignored. Digits typed in another script, such as full-width １２３, count as the same numbers. A wrong check digit is refused, with the right one named, rather than quietly corrected into another product's code. Retail codes print in their standard style: the digits grouped under the bars, the guard bars running down between them, and bars along the top and bottom of ITF-14. Every barcode keeps the blank margins scanners need inside its box, and warns when it's too small to scan reliably.
@@ -57,6 +57,11 @@ The app stops by itself about 10 seconds after you close its last window or tab,
   - Align them to each other (Selection) or to the printable area (Label).
   - Distribute three or more with equal gaps. The outermost two stay put.
   - Colour, Duplicate and Delete apply to all of them.
+- **Copy and paste:** Ctrl+C, Ctrl+X and Ctrl+V copy, cut and paste the selected elements, and Ctrl+D duplicates them. What's copied stays inside the app: it pastes into any Oh-Brother window in the same browser, onto any label, but not into other programs. Pasted onto a smaller label, elements are moved onto it, and any larger than it are cut down to fit.
+- **Keyboard:** Tab reaches every control, and a blue ring shows where you are. On a Mac, use Cmd where this page says Ctrl.
+  - Each element on the label is a stop. Tab to one to select it, then use the arrow keys as above, or Enter to edit its text.
+  - The Elements list is one stop. Up and Down move through it, Space selects an element, and Shift with an arrow selects several. Alt with an arrow moves an element forward or backward, and Delete removes it.
+  - The data rows are one stop. Up and Down preview another row, as do Page Up, Page Down, Home and End, and Space ticks or unticks it.
 - **Fields:** `{{name}}` in any text, QR code or barcode becomes a field. Names ignore case, so `{{Code}}` and `{{code}}` are the same field. Fill it with fixed text or a column from a data file. Built-in fields: `{{date}}`, `{{time}}` and `{{datetime}}`.
   - Fixed text can include other fields: set `{{code}}` to `{{item}}` or `P-{{item}}-{{date}}`. It can also name any data column, even one the label doesn't use. A field named only here gets its own row.
   - Values from data cells are printed exactly as written, `{{…}}` included.

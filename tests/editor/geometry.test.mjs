@@ -129,6 +129,22 @@ test("nudge", () => {
   eq(e, { x: 1.5, y: -1 });
 });
 
+test("resizing from the keyboard moves the right and bottom edges", () => {
+  const box = { type: "text", x: 2, y: 2, w: 10, h: 4 }, qr = { type: "qr", x: 0, y: 0, w: 10, h: 10 };
+  g.resizeBy([box, qr], 0.5, 0);
+  eq([box.x, box.y, box.w, box.h], [2, 2, 10.5, 4]);
+  eq([qr.w, qr.h], [10.5, 10.5]);   // a QR code stays square
+  g.resizeBy([box, qr], 0, -2);
+  eq([box.w, box.h], [10.5, 2]);
+  eq([qr.w, qr.h], [8.5, 8.5]);
+});
+
+test("the keyboard can't resize a box to nothing either", () => {
+  const box = { type: "rect", x: 0, y: 0, w: 1.2, h: 0.6 }, qr = { type: "qr", x: 0, y: 0, w: 2, h: 2 };
+  g.resizeBy([box, qr], -2, -2);
+  eq([box.w, box.h, qr.w, qr.h], [g.MIN_W, g.MIN_H, g.MIN_W, g.MIN_W]);
+});
+
 test("a new label shape scales the layout, and QR codes stay square", () => {
   const text = { type: "text", x: 10, y: 10, w: 20, h: 10 }, qr = { type: "qr", x: 0, y: 0, w: 10, h: 10 };
   g.rescale([text, qr], 2, 1);

@@ -186,6 +186,20 @@ These cut sizes are derived from brother_ql's label data, not measured.
 
 Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid, or 0.02 in (0.508 mm) when using inches. Positions are stored to 0.01 mm, so snapped centres stay exact, including after the label is reshaped.
 
+## Keyboard and screen readers
+
+Tab reaches every control, and three places with many items are one stop each, so Tab doesn't have to pass through every item:
+
+- **The label.** Each element's box in the overlay can take focus (`tabindex="0"`), and focus selects it (`focusin` on `#overlay`). A click doesn't give a box focus, since it starts a drag instead, so this is the keyboard's way in only. The keys then go to the handler on `document`, as they do after a click: arrows nudge, Alt with an arrow resizes (`geometry.resizeBy()`), Enter opens the element's text. The overlay is rebuilt when the number of elements changes; if a box had focus, focus goes to the element now selected, or to the one in its place.
+- **The Elements list.** One row has `tabindex="0"`, the one `listAt` names; the rest have `-1`. The list is rebuilt on every change, so `drawList()` notes which control had focus and `focusList()` puts it back, on the same row or, after a reorder, wherever that row went. Its own `keydown` handler stops the keys there, so an arrow in the list doesn't also nudge the selection on the label.
+- **The data rows.** The previewed row has `tabindex="0"`. The rows' tick boxes are out of the Tab order (`tabindex="-1"`), or 5,000 rows would be 5,000 stops; Space on the row ticks it instead.
+
+Copy, cut and paste keep the copied elements as JSON in the browser's storage (`oh-brother:clipboard`), not on the system clipboard, which a page may read only with permission. That's why a paste works between the app's windows and nowhere else. What comes back is tidied like a template's elements (`elements.tidyElements()`), since another window, or anything else with access to the storage, wrote it. Ctrl+C and Ctrl+X leave the browser's own copy alone while text is selected on the page.
+
+For screen readers, buttons that show only a symbol have an `aria-label`, segmented buttons and selectable rows say whether they're on (`aria-pressed`), each element is named by `describe()`, and warnings are a live region. `h()` writes `true` and `false` out in full for `aria-` attributes, where other attributes are simply present or absent. One rule in `style.css` draws the focus ring, and only for focus that came from the keyboard (`:focus-visible`).
+
+None of this has been tried with a screen reader, and the keys have been tried in Chromium only.
+
 ## Fields
 
 The browser builds one record per label. A record holds the data row's columns, if data is loaded, then the layout's fields, each from its fixed value or its mapped column. With the record, the browser sends `chain`: the names of fields whose values are fixed text.

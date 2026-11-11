@@ -10,16 +10,22 @@ import { r2 } from "./units.mjs";
 // lengths: the least and most a continuous label may be, in mm (/api/meta).
 export function tidyLayout(l, lengths) {
   if (!l || typeof l !== "object" || Array.isArray(l)) return null;
-  // A number, or a default: the renderer's own, for a key that's missing or isn't one
-  const or = (v, d) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(+v) ? +v : d;
   const [min, max] = lengths;
-  const elements = (Array.isArray(l.elements) ? l.elements : [])
+  return { ...l, tape: typeof l.tape === "string" ? l.tape : "62red",
+    length_mm: Math.max(min, Math.min(max, or(l.length_mm, 30))),
+    orientation: l.orientation === "landscape" ? "landscape" : "portrait", elements: tidyElements(l.elements) };
+}
+
+// A number, or a default: the renderer's own, for a key that's missing or isn't one
+const or = (v, d) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(+v) ? +v : d;
+
+// A list of elements made safe to edit: whatever isn't an element is dropped,
+// and each one has a position, a size and, if it's text, its text
+export function tidyElements(list) {
+  return (Array.isArray(list) ? list : [])
     .filter((e) => e && typeof e === "object" && !Array.isArray(e))
     .map((e) => ({ ...e, x: or(e.x, 0), y: or(e.y, 0), w: or(e.w, 10), h: or(e.h, 10),
       ...(e.type === "text" ? { text: String(e.text ?? "") } : {}) }));
-  return { ...l, tape: typeof l.tape === "string" ? l.tape : "62red",
-    length_mm: Math.max(min, Math.min(max, or(l.length_mm, 30))),
-    orientation: l.orientation === "landscape" ? "landscape" : "portrait", elements };
 }
 
 // The list without the elements at the indexes in idx
@@ -48,4 +54,28 @@ export function duplicateEls(els, idx) {
   });
   idx.slice().sort((a, b) => a - b).forEach((i, n) => copies.add(i + n + 1));
   return copies;
+}
+
+// Copies of the elements at idx, in their order in the list: what Copy keeps
+export const copyEls = (els, idx) => idx.slice().sort((a, b) => a - b).map((i) => structuredClone(els[i]));
+
+// Paste copied elements on top of the others. Returns the new ones' indexes.
+// Each lands `shift` mm right and down from where it was copied, so a paste
+// doesn't hide its original and a second paste doesn't hide the first. The
+// label may be smaller than the one they came from: an element larger than
+// it is cut down to it (a QR code staying square), and none lands off it.
+// red: false when the tape prints black only.
+export function pasteEls(els, clip, canvas, { shift = 0, red = true } = {}) {
+  const added = new Set();
+  for (const c of clip) {
+    const e = structuredClone(c);
+    if (!red) e.color = "black";
+    e.w = r2(Math.min(e.w, canvas.w)); e.h = r2(Math.min(e.h, canvas.h));
+    if (e.type === "qr") e.w = e.h = Math.min(e.w, e.h);
+    e.x = r2(Math.max(0, Math.min(e.x + shift, canvas.w - e.w)));
+    e.y = r2(Math.max(0, Math.min(e.y + shift, canvas.h - e.h)));
+    els.push(e);
+    added.add(els.length - 1);
+  }
+  return added;
 }

@@ -19,6 +19,7 @@ const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k.startsWith("aria-") && typeof v === "boolean") el.setAttribute(k, v);   // "true" or "false", spelled out
     else if (v === true) el.setAttribute(k, "");
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
@@ -279,11 +280,18 @@ function drawOverlay() {
   // Rebuild only when the element count changes. Otherwise update in place,
   // so a box being dragged is never replaced under the pointer.
   if (ov.children.length !== els.length) {
-    ov.replaceChildren(...els.map((_, i) => h("div", { class: "box", "data-i": i },
+    // Each box takes keyboard focus (Tab), which selects it. If one had focus,
+    // focus goes to the element now selected, or to the one in its place.
+    const had = ov.contains(document.activeElement) ? +document.activeElement.dataset.i : -1;
+    ov.replaceChildren(...els.map((_, i) => h("div", { class: "box", "data-i": i, tabindex: 0, role: "button" },
       ...HANDLES.map((d) => h("div", { class: `handle ${d}${d.length === 1 ? " edge" : ""}`, "data-h": d })))));
+    if (had >= 0) ov.children[S.sel >= 0 ? S.sel : Math.min(had, els.length - 1)]?.focus();
   }
   els.forEach((e, i) => placeBox(ov.children[i], e, i));
 }
+
+// An element in words, for a screen reader: "Text: {{title}}, red"
+const describe = (e) => `${KIND[e.type]}: ${summary(e) || "empty"}${e.color === "red" ? ", red" : ""}`;
 
 function placeBox(box, e, i) {
   const k = dpmm() * S.scale, w = e.w * k, hh = e.h * k;
@@ -301,6 +309,8 @@ function placeBox(box, e, i) {
       : `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
   } else delete box.dataset.blank;
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
+  box.setAttribute("aria-label", describe(e));
+  box.setAttribute("aria-pressed", S.pick.has(i));
 }
 
 // Bounding box (mm) of the given element indexes
@@ -482,33 +492,96 @@ function distribute(vert) {
   schedule();
 }
 
-// Keyboard: nudge with arrows (0.5 mm, Shift = 2 mm; in inches 0.02 in,
-// Shift = 0.1 in), Delete or Backspace removes, Escape deselects, Ctrl+A
-// selects all
+// Copy, cut and paste elements. What's copied is kept in this browser's
+// storage rather than the system clipboard, which a page may read only with
+// permission: so it pastes into any window of the app, and nowhere else.
+const CLIP = "oh-brother:clipboard";
+let clip = "", pastes = 0;   // the copied elements as JSON, and how often they've been pasted here
+
+function copyPicked() {
+  if (!S.pick.size) return false;
+  clip = JSON.stringify(elementOps.copyEls(S.layout.elements, picked()));
+  pastes = 0;
+  try { localStorage.setItem(CLIP, clip); } catch {}
+  return true;
+}
+
+function cutPicked() {
+  if (!copyPicked()) return false;
+  removeEls(picked());
+  return true;
+}
+
+function pasteCopied() {
+  let j = clip;
+  try { j = localStorage.getItem(CLIP) || clip; } catch {}
+  let els = [];
+  try { els = elementOps.tidyElements(JSON.parse(j || "[]")).filter((e) => e.type in KIND); } catch {}
+  if (!els.length) return false;
+  if (j !== clip) { clip = j; pastes = 0; }   // copied in another window since
+  // Each paste lands a step further from the original, so none hides another
+  const added = elementOps.pasteEls(S.layout.elements, els, canvasMM(), { shift: ++pastes * elementOps.COPY_OFFSET, red: tape().red });
+  listAt = Math.max(...added);
+  setPick(added); schedule();
+  return true;
+}
+
+// Ctrl or Cmd with a letter. Each returns whether it did anything, so a key
+// with nothing to act on keeps its meaning in the browser.
+const SHORTCUTS = {
+  a: () => { setPick(new Set(S.layout.elements.map((_, i) => i))); return true; },
+  c: copyPicked,
+  x: cutPicked,
+  v: pasteCopied,
+  d: () => { if (!S.pick.size) return false; dupEls(picked()); return true; },
+};
+
+// Keyboard, with an element selected: arrows nudge (0.5 mm, Shift = 2 mm; in
+// inches 0.02 in, Shift = 0.1 in) and with Alt resize; Delete or Backspace
+// removes; Escape deselects. Ctrl+A selects all; Ctrl+C, X, V and D copy,
+// cut, paste and duplicate.
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, textarea, select") || $("#settings").open) return;
-  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
-    setPick(new Set(S.layout.elements.map((_, i) => i))); ev.preventDefault(); return;
+  const letter = ev.key.toLowerCase();
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && letter in SHORTCUTS) {
+    // Text selected on the page (a warning, say) is the browser's to copy
+    if ("cx".includes(letter) && String(getSelection())) return;
+    if (SHORTCUTS[letter]()) ev.preventDefault();
+    return;
   }
   if (!S.pick.size) return;
   const step = nudgeStep(ev.shiftKey);
   const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
   if (d) {
-    geo.nudge(pickedEls(), ...d);
-    drawProps(true); schedule(); ev.preventDefault();
+    if (ev.altKey) geo.resizeBy(pickedEls(), ...d); else geo.nudge(pickedEls(), ...d);
+    drawList(); drawProps(true); schedule(); ev.preventDefault();
   }
   else if (ev.key === "Delete" || ev.key === "Backspace") { removeEls(picked()); ev.preventDefault(); }
   else if (ev.key === "Escape") select(-1);
 });
 
-// Double-click a text, QR or barcode element: jump to its text field
-$("#overlay").addEventListener("dblclick", (ev) => {
-  const box = ev.target.closest(".box");
-  if (!box) return;
-  select(+box.dataset.i);
+// Double-click a text, QR or barcode element, or press Enter on it: jump to
+// its text field
+function editElement(i) {
+  select(i);
   const f = $("#props").querySelector('[data-key="text"], [data-key="data"]');
   if (f) { f.focus(); f.setSelectionRange?.(f.value.length, f.value.length); }
   else $("#props").querySelector('input[type="file"]')?.click();   // an image: choose one
+}
+$("#overlay").addEventListener("dblclick", (ev) => {
+  const box = ev.target.closest(".box");
+  if (box) editElement(+box.dataset.i);
+});
+$("#overlay").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" || !ev.target.matches(".box")) return;
+  editElement(+ev.target.dataset.i);
+  ev.preventDefault();
+});
+// Focus reaches a box only from the keyboard (a click starts a drag instead),
+// and selects it, unless it's already part of a selection
+$("#overlay").addEventListener("focusin", (ev) => {
+  const i = +ev.target.dataset.i;
+  if (ev.target.matches(".box") && !S.pick.has(i)) select(i);
 });
 
 // ---------------------------------------------------------------------------
@@ -535,6 +608,7 @@ function setPick(set) {
 
 // add=true toggles i in the selection; otherwise i becomes the only one (-1 = none)
 function select(i, add = false) {
+  if (i >= 0) listAt = i;   // the list's tab stop follows what was last picked
   const set = add ? new Set(S.pick) : new Set();
   if (i >= 0) add && set.has(i) ? set.delete(i) : set.add(i);
   setPick(set);
@@ -542,6 +616,7 @@ function select(i, add = false) {
 
 function removeEls(idx) {
   S.layout.elements = elementOps.removeEls(S.layout.elements, idx);
+  listAt = Math.min(Math.min(...idx), S.layout.elements.length - 1);   // the row that took their place
   setPick(new Set()); schedule();
 }
 
@@ -551,27 +626,74 @@ function moveEl(i, d) {
   select(j); schedule();
 }
 
+// The list is one stop for the Tab key: the row at listAt (an element index).
+// Up and Down move between rows, Space or Enter selects one, Shift with an
+// arrow extends the selection, Alt with an arrow reorders, and Delete removes.
+// The four buttons of a selected row follow it in the Tab order.
+let listAt = -1;
+
+const ACTS = [   // [key, title, label, what it does to element i]
+  ["up", "Bring forward (Alt+↑)", "↑", (i) => moveEl(i, 1)],
+  ["down", "Send backward (Alt+↓)", "↓", (i) => moveEl(i, -1)],
+  ["dup", "Duplicate (Ctrl+D)", "⧉", (i) => dupEls([i])],
+  ["del", "Delete (Del)", "×", (i) => removeEls([i])],
+];
+
 function drawList() {
-  const els = S.layout.elements;
+  const els = S.layout.elements, list = $("#elList");
+  // The list is rebuilt on every change, so focus inside it is put back
+  // afterwards, on the same control of whichever row listAt names by then
+  const act = list.contains(document.activeElement) ? document.activeElement.dataset.act ?? "" : null;
+  if (!(listAt >= 0 && listAt < els.length)) listAt = S.sel >= 0 ? S.sel : els.length - 1;
   // Listed top-most first: later elements are drawn on top
   const items = els.map((e, i) => i).reverse().map((i) => {
-    const e = els[i];
-    return h("li", { class: S.pick.has(i) ? "sel" : "", onclick: (ev) => select(i, additive(ev)) },
-      h("span", { class: "swatch" + (e.color === "red" ? " red" : "") }),
-      h("span", { class: "kind" }, KIND[e.type]),
-      h("span", { class: "txt", title: summary(e) }, summary(e)),
-      h("span", { class: "acts" },
-        h("button", { class: "icon", title: "Bring forward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, 1); } }, "↑"),
-        h("button", { class: "icon", title: "Send backward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, -1); } }, "↓"),
-        h("button", { class: "icon", title: "Duplicate", onclick: (ev) => { ev.stopPropagation(); dupEls([i]); } }, "⧉"),
-        h("button", { class: "icon", title: "Delete", onclick: (ev) => { ev.stopPropagation(); removeEls([i]); } }, "×")));
+    const e = els[i], sel = S.pick.has(i);
+    return h("li", { class: sel ? "sel" : "", "data-i": i },
+      h("button", { type: "button", class: "el", "data-act": "", tabindex: i === listAt ? 0 : -1,
+        "aria-pressed": sel, "aria-label": describe(e), onclick: (ev) => select(i, additive(ev)) },
+        h("span", { class: "swatch" + (e.color === "red" ? " red" : "") }),
+        h("span", { class: "kind" }, KIND[e.type]),
+        h("span", { class: "txt", title: summary(e) }, summary(e))),
+      h("span", { class: "acts" }, ...ACTS.map(([key, title, label, run]) =>
+        h("button", { type: "button", class: "icon", "data-act": key, title, "aria-label": title.replace(/ \(.*/, ""),
+          onclick: () => run(i) }, label))));
   });
-  $("#elList").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
+  list.replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
+  if (act !== null) focusList(act);
 }
+
+// Put focus in the list: on the row at listAt, or on one of its buttons
+function focusList(act = "") {
+  const list = $("#elList"), li = list.querySelector(`li[data-i="${listAt}"]`);
+  for (const b of list.querySelectorAll(".el")) b.tabIndex = b.parentNode === li ? 0 : -1;
+  li?.querySelector(`[data-act="${act}"]`)?.focus();
+  if (!li?.contains(document.activeElement)) li?.querySelector(".el").focus();   // that button is hidden: the row isn't selected
+}
+
+$("#elList").addEventListener("keydown", (ev) => {
+  const li = ev.target.closest("li[data-i]");
+  if (!li) return;
+  const i = +li.dataset.i, rows = [...li.parentNode.children], at = rows.indexOf(li);
+  const to = { ArrowUp: at - 1, ArrowDown: at + 1, Home: 0, End: rows.length - 1 }[ev.key];
+  if (to !== undefined) {
+    const j = +rows[Math.max(0, Math.min(rows.length - 1, to))].dataset.i;
+    if (ev.altKey) { if (ev.key.startsWith("Arrow") && j !== i) moveEl(i, j - i); }   // redrawn with focus on the moved row
+    else {
+      listAt = j;
+      if (ev.shiftKey) setPick(new Set([...S.pick, i, j])); else focusList();
+    }
+  } else if (ev.key === "Delete" || ev.key === "Backspace") {
+    removeEls(S.pick.has(i) ? picked() : [i]);   // the selection, or just this row if it isn't part of it
+  } else return;
+  // Not for the keys on the label, which would nudge or remove the selection
+  ev.preventDefault(); ev.stopPropagation();
+});
 
 // Each copy is stacked just above its original, 2 mm right and down; the copies end up selected
 function dupEls(idx) {
-  setPick(elementOps.duplicateEls(S.layout.elements, idx)); schedule();
+  const copies = elementOps.duplicateEls(S.layout.elements, idx);
+  listAt = Math.max(...copies);
+  setPick(copies); schedule();
 }
 
 // Form helpers bound to the selected element
@@ -606,7 +728,7 @@ const seg = (key, opts) => {
   const wrap = h("div", { class: "seg" });
   const draw = () => wrap.replaceChildren(...opts.map(([v, txt, extra = {}]) =>
     h("button", { type: "button", class: (e[key] === v ? "on " : "") + (extra.cls || ""), disabled: extra.disabled,
-      title: extra.title, onclick: () => { e[key] = v; draw(); drawList(); schedule(); } }, txt)));
+      "aria-pressed": e[key] === v, title: extra.title, onclick: () => { e[key] = v; draw(); drawList(); schedule(); } }, txt)));
   draw();
   return wrap;
 };
@@ -635,11 +757,13 @@ function drawMultiProps(box) {
   const idx = picked(), els = idx.map((i) => S.layout.elements[i]);
   const to = h("div", { class: "seg" });
   const drawTo = () => to.replaceChildren(...[["selection", "Selection"], ["label", "Label"]].map(([v, t]) =>
-    h("button", { type: "button", class: S.alignTo === v ? "on" : "", onclick: () => { S.alignTo = v; drawTo(); } }, t)));
+    h("button", { type: "button", class: S.alignTo === v ? "on" : "", "aria-pressed": S.alignTo === v,
+      onclick: () => { S.alignTo = v; drawTo(); } }, t)));
   drawTo();
   const colour = h("div", { class: "seg" });
   const drawColour = () => colour.replaceChildren(...colourOpts(tape().red).map(([v, t, x = {}]) =>
     h("button", { type: "button", class: (els.every((e) => e.color === v) ? "on " : "") + (x.cls || ""), disabled: x.disabled, title: x.title,
+      "aria-pressed": els.every((e) => e.color === v),
       onclick: () => { els.forEach((e) => { e.color = v; }); drawColour(); drawList(); schedule(); } }, t)));
   drawColour();
   const n3 = idx.length >= 3 ? {} : { disabled: true, title: "Select three or more" };
@@ -834,8 +958,9 @@ function drawSetup() {
   len.value = toUnit(S.layout.length_mm);
   $("#lengthRow").querySelector("label").hidden = !t.endless;
   $("#printable").textContent = t.endless ? `${fmt(t.printable_mm[0])} wide` : fmt2(...t.printable_mm);
-  $("#orientation").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.layout.orientation));
-  $("#units").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === units()));
+  const press = (b, on) => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); };
+  $("#orientation").querySelectorAll("button").forEach((b) => press(b, b.dataset.v === S.layout.orientation));
+  $("#units").querySelectorAll("button").forEach((b) => press(b, b.dataset.v === units()));
 }
 
 // Redraw every panel and the label, after the layout is replaced, reshaped or
@@ -921,7 +1046,7 @@ async function drawTemplates() {
   const { templates, samples = [] } = await api("/api/templates");
   const own = templates.map((n) => h("li", { class: "own" },
     h("button", { class: "name", onclick: () => loadTemplate(n) }, n),
-    h("button", { class: "icon", title: "Delete template", onclick: async () => {
+    h("button", { class: "icon", title: "Delete template", "aria-label": `Delete template ${n}`, onclick: async () => {
       if (!confirm(`Delete template “${n}”?`)) return;
       try {
         await api(`/api/templates/${encodeURIComponent(n)}`, { method: "DELETE" });
@@ -983,13 +1108,13 @@ function drawData() {
   const ph = fields();
   const rows = ph.map((p) => {
     const fixedIn = h("input", { type: "text", placeholder: "text or {{field}}", value: S.fixed[fkey(p)] ?? "",
-      title: "Fixed text. May include other fields, such as {{item}}" });
+      "aria-label": `Fixed text for ${p}`, title: "Fixed text. May include other fields, such as {{item}}" });
     fixedIn.addEventListener("input", () => { S.fixed[fkey(p)] = fixedIn.value; schedule(); });
     // A newly referenced field gets its own row once typing is done
     fixedIn.addEventListener("change", () => { if (fields().join("\u0000") !== ph.join("\u0000")) { autoMap(); drawData(); } });
     let src = null;
     if (S.data) {
-      src = h("select", {}, h("option", { value: "" }, "— fixed text —"),
+      src = h("select", { "aria-label": `Column for ${p}` }, h("option", { value: "" }, "— fixed text —"),
         ...S.data.headers.map((c) => h("option", { value: c }, c)));
       src.value = S.mapping[fkey(p)] ?? "";
       fixedIn.hidden = !!src.value;
@@ -1012,12 +1137,16 @@ function drawData() {
 }
 
 // The rows table is built only when data is loaded: rebuilding it takes about
-// a second per 5,000 rows. Clicks and ticks update it in place.
+// a second per 5,000 rows. Clicks and ticks update it in place. For the Tab
+// key the table is one stop, the row being previewed: Up and Down (and Home,
+// End, Page Up and Page Down) preview another row, and Space ticks it. The
+// rows' own tick boxes are left out of the Tab order, or there'd be one stop
+// for every row.
 
 function drawRows() {
   if (!S.data) { $("#rows").replaceChildren(); return; }
   const { headers, rows } = S.data;
-  const all = h("input", { type: "checkbox", title: "Select all", class: "all" });
+  const all = h("input", { type: "checkbox", title: "Select all", "aria-label": "Print every row", class: "all" });
   all.addEventListener("change", () => {
     S.picked = all.checked ? new Set(rows.map((_, i) => i)) : new Set();
     for (const cb of $("#rows tbody").querySelectorAll("input")) cb.checked = all.checked;
@@ -1025,11 +1154,12 @@ function drawRows() {
   });
   const thead = h("thead", {}, h("tr", {}, h("th", {}, all), h("th", {}, "#"), ...headers.map((c) => h("th", {}, c))));
   const tbody = h("tbody", {}, ...rows.map((r, i) => {
-    const cb = h("input", { type: "checkbox" });
+    const cb = h("input", { type: "checkbox", tabindex: -1, "aria-label": `Print row ${i + 1}` });
     cb.checked = S.picked.has(i);
     cb.addEventListener("click", (ev) => ev.stopPropagation());   // ticking doesn't preview the row
     cb.addEventListener("change", () => { cb.checked ? S.picked.add(i) : S.picked.delete(i); drawPicked(); });
-    return h("tr", { class: i === S.cur ? "cur" : "", onclick: () => showRow(i) },
+    return h("tr", { class: i === S.cur ? "cur" : "", tabindex: i === S.cur ? 0 : null,
+      "aria-current": i === S.cur ? "true" : null, onclick: () => showRow(i) },
       h("td", {}, cb), h("td", { class: "n" }, i + 1), ...headers.map((c) => h("td", { title: r[c] }, r[c])));
   }));
   $("#rows").replaceChildren(thead, tbody);
@@ -1037,12 +1167,31 @@ function drawRows() {
 }
 
 function showRow(i) {
-  const body = $("#rows tbody");
-  body.children[S.cur]?.classList.remove("cur");
-  body.children[i].classList.add("cur");
+  const body = $("#rows tbody"), was = body.children[S.cur], now = body.children[i];
+  if (was) { was.classList.remove("cur"); was.removeAttribute("tabindex"); was.removeAttribute("aria-current"); }
+  now.classList.add("cur");
+  now.tabIndex = 0;
+  now.setAttribute("aria-current", "true");
   S.cur = i;
   schedule();
 }
+
+$("#rows").addEventListener("keydown", (ev) => {
+  const tr = ev.target.closest("tbody tr");
+  if (!tr || ev.target.matches("input") || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const n = S.data.rows.length;
+  const to = { ArrowUp: S.cur - 1, ArrowDown: S.cur + 1, PageUp: S.cur - 10, PageDown: S.cur + 10, Home: 0, End: n - 1 }[ev.key];
+  if (to !== undefined) {
+    showRow(Math.max(0, Math.min(n - 1, to)));
+    const now = tr.parentNode.children[S.cur];
+    now.focus();
+    now.scrollIntoView({ block: "nearest" });
+  } else if (ev.key === " ") {
+    tr.querySelector("input").click();   // ticks or unticks the row
+  } else return;
+  // Not for the keys on the label, which would nudge the selected elements
+  ev.preventDefault(); ev.stopPropagation();
+});
 
 // The selection count, the Select all box, and the print button
 function drawPicked() {
@@ -1134,6 +1283,9 @@ function drawPrinterChip(ok) {
   const c = S.meta.config;
   $("#printerLabel").textContent = c.printer_host ? `${c.model} · ${c.printer_host}` : "No printer set";
   $("#printerDot").className = "dot" + (ok === true ? " ok" : ok === false ? " bad" : "");
+  // The dot's colour, in words
+  $("#printerChip").setAttribute("aria-label", "Printer settings. " + $("#printerLabel").textContent
+    + (ok === true ? ", connected" : ok === false ? ", not answering" : ""));
 }
 
 function openSettings() {

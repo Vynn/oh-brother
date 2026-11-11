@@ -4,6 +4,13 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 
 ## 0.5.0 · not yet released
 
+### Added
+
+- The editor works from the keyboard. Tab reaches every control, with a blue ring to show where you are. Each element on the label is a stop: Tab to one to select it, and Enter edits its text. The Elements list is one stop: Up and Down move through it, Space selects, Shift with an arrow selects several, Alt with an arrow moves an element forward or backward, and Delete removes it. The data rows are one stop too: Up and Down preview another row and Space ticks it.
+- Copy, cut and paste for elements, with Ctrl+C, Ctrl+X and Ctrl+V, and Ctrl+D to duplicate. What's copied pastes into any Oh-Brother window in the same browser, onto any label. On a label smaller than the one it came from, elements are moved onto it and any larger than it are cut down to fit.
+- Alt with an arrow key resizes the selected elements, as the arrows alone move them.
+- Names for screen readers: buttons that show only a symbol say what they do, each element is named by its kind and text, the buttons that switch between choices say which is on, and warnings are read out as they appear. This hasn't been tried with a screen reader yet.
+
 ### Changed
 
 - Everything `build.sh` downloads is checked against a SHA-256 kept in the repository: the Python runtime, every package, and the tool pip uses to build one of them. A download that doesn't match stops the build. Each folder is built beside the one it replaces and swapped in when complete, so a build that fails, or runs with no network, leaves the last working one in place. It used to delete the packages first.
@@ -11,7 +18,7 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 - The editor's page says what it may load, in a Content-Security-Policy: its own script and stylesheet and nothing from elsewhere. No other site can show the editor inside its own page, where a click meant for that page could land on Print.
 - Requests to the app from a page on another site are refused when the browser says that's where they come from. This adds to the checks already there, and covers the data upload, which they left open. Browsers say so only to this computer's own address, so it does nothing for `--lan`.
 - Continuous integration checks the shell scripts with shellcheck, the editor's code with Node and the Python with pyflakes, as well as running the tests.
-- The editor's code is split into modules, and the parts that need no page have tests of their own: 73, covering snapping while moving and resizing, every quick layout on every tape, fields and records, undo, image sizes and print counts. They run in a browser, on a page the app serves when started with `--tests`, and under Node in CI. The editor works as before.
+- The editor's code is split into modules, and the parts that need no page have tests of their own: 81, covering snapping while moving and resizing, every quick layout on every tape, fields and records, undo, image sizes and print counts. They run in a browser, on a page the app serves when started with `--tests`, and under Node in CI. The editor works as before.
 
 ## 0.4.2 · 2026-11-10
 

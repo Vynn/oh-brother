@@ -13,7 +13,7 @@
   --ink: #141414;
   --red: #d42b20;
   --red-soft: #fbe9e7;
-  --accent: #2f6fdf;          /* selection only */
+  --accent: #2f6fdf;          /* selection and keyboard focus only */
   --ok: #2f8f4e;
   --warn: #a8660b;
   --stage: #e7e5e1;
@@ -100,6 +100,13 @@ button.link { border: 0; background: none; padding: 0 4px; color: var(--muted); 
 button.icon { width: 26px; height: 26px; padding: 0; color: var(--muted); border-color: transparent; background: none; }
 button.icon:hover { border-color: var(--line); background: var(--surface); }
 
+/* Keyboard focus: one ring everywhere, shown only when the keyboard put focus
+   there. Text fields keep their own (above), which shows for the mouse too. */
+button:focus-visible, summary:focus-visible, input[type=checkbox]:focus-visible, input[type=range]:focus-visible,
+.file-btn:has(input:focus-visible), .box:focus-visible, .rows tbody tr:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 1px;
+}
+
 /* segmented control */
 .seg { display: flex; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
 .seg button { flex: 1; border: 0; border-radius: 0; height: 28px; padding: 0 6px; color: var(--muted); }
@@ -107,6 +114,10 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
 .seg button.on { background: var(--ink); color: #fff; }
 .seg button.on.red { background: var(--red); }
 .seg button:disabled { opacity: .35; }
+/* The control clips what's outside it, so the ring goes inside the button,
+   in white where the button is filled */
+.seg button:focus-visible { outline-offset: -2px; }
+.seg button.on:focus-visible { outline-color: #fff; }
 
 .check { display: inline-flex; align-items: center; gap: 6px; color: var(--text); cursor: pointer; }
 .checks { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 10px; }
@@ -164,6 +175,8 @@ button.icon:hover { border-color: var(--line); background: var(--surface); }
 .box { position: absolute; cursor: move; touch-action: none; }
 .box:hover { outline: 1px dashed rgba(47,111,223,.6); }
 .box.sel { outline: 1.5px solid var(--accent); }
+/* Focus from the keyboard: a second line around the selection's own */
+.box:focus-visible { outline-offset: 3px; box-shadow: 0 0 0 1.5px var(--accent); }
 .box .handle {
   position: absolute; width: 9px; height: 9px; margin: -5px 0 0 -5px;
   background: #fff; border: 1.5px solid var(--accent); display: none;
@@ -233,7 +246,8 @@ table { border-collapse: collapse; }
 .rows th, .rows td { padding: 4px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .rows th { position: sticky; top: 0; background: var(--panel); font-weight: 600; color: var(--muted); z-index: 1; }
 .rows tr.cur td { background: #eef3fd; }
-.rows tbody tr { cursor: pointer; }
+.rows tbody tr { cursor: pointer; scroll-margin-top: 28px; }   /* clear of the heading row when scrolled to */
+.rows tbody tr:focus-visible { outline-offset: -2px; }
 .rows tbody tr:hover td { background: #f6f5f3; }
 .rows td.n { color: var(--faint); font-family: var(--mono); }
 
@@ -258,10 +272,13 @@ table { border-collapse: collapse; }
 .add-row button:nth-child(n+4) { grid-column: span 3; }
 .add-row button { padding: 0 4px; font-size: 12px; }
 .el-list { list-style: none; margin: 0; padding: 0; }
-.el-list li {
-  display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 4px 0 8px;
-  border-radius: var(--radius); cursor: pointer;
+.el-list li { display: flex; align-items: center; height: 32px; padding-right: 4px; border-radius: var(--radius); }
+/* The row itself is a button, filling whatever its four action buttons leave */
+.el-list .el {
+  flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 8px;
+  border: 0; background: none; text-align: left;
 }
+.el-list .el:focus-visible { outline-offset: -2px; }
 .el-list li:hover { background: #f1f0ed; }
 .el-list li.sel { background: #e9effb; }
 .el-list .swatch { width: 10px; height: 10px; border-radius: 2px; background: var(--ink); flex: none; }
@@ -276,6 +293,9 @@ table { border-collapse: collapse; }
 .props:empty { display: none; }
 .props .num4 input { padding: 0 6px; }
 .props .sub { margin-top: 4px; font-size: 11px; color: var(--faint); }
+/* A hint tucked under the field above it. A class, not a style attribute:
+   the page's Content-Security-Policy allows styles from this file only. */
+.props .sub.under { margin: -6px 0 10px; }
 
 /* ---- dialog ----------------------------------------------------------- */
 dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; width: min(440px, 92vw); box-shadow: 0 20px 60px rgba(0,0,0,.2); }

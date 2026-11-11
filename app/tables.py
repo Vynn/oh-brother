@@ -16,6 +16,11 @@ import zipfile
 import zlib
 
 MAX_XML = 64 * 1024 * 1024   # largest unpacked part of a spreadsheet we'll parse
+# Most cells (rows x columns) in one table. A spreadsheet can put a cell in
+# its last column, 16,384, on every row in a few bytes each, and the empty
+# cells before them are filled in here: a file under 1 MB took 2.6 GB.
+MAX_CELLS = 1_000_000
+TOO_MANY_CELLS = f"The file has too many cells (over {MAX_CELLS:,}). Use a smaller part of it."
 
 NS = {
     "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
@@ -43,14 +48,32 @@ DAMAGED = (zipfile.BadZipFile, zlib.error, EOFError, ET.ParseError,
            KeyError, IndexError, StopIteration, ValueError)
 
 
+class Room:
+    """Counts cells as a table is built, and stops it at MAX_CELLS."""
+
+    def __init__(self):
+        self.left = MAX_CELLS
+
+    def take(self, n):
+        """Call before making `n` cells, so too many are never made."""
+        self.left -= n
+        if self.left < 0:
+            raise TableError(TOO_MANY_CELLS)
+
+
 def read_table(name, raw):
     """Rows (lists of strings) from an uploaded file's name and bytes."""
     try:
-        return _read(name, raw)
+        rows = _read(name, raw)
     except TableError:
         raise
     except DAMAGED:
         raise TableError("The file looks damaged") from None
+    # Each row is later given every column, so the size that counts is rows
+    # times the widest row: one very long row makes them all that long
+    if len(rows) * max(map(len, rows), default=0) > MAX_CELLS:
+        raise TableError(TOO_MANY_CELLS)
+    return rows
 
 
 def _read(name, raw):
@@ -138,10 +161,12 @@ def _json_rows(text):
     if all(isinstance(r, list) for r in data):
         return [[cell(v) for v in r] for r in data]
     if all(isinstance(r, dict) for r in data):
-        headers = []
+        headers = {}   # a dict keeps the order and finds a name quickly
         for r in data:
-            headers += [k for k in r if k not in headers]
-        return [headers] + [[cell(r.get(h)) for h in headers] for r in data]
+            headers.update(dict.fromkeys(r))
+        if (len(data) + 1) * len(headers) > MAX_CELLS:   # before the rows are filled out
+            raise TableError(TOO_MANY_CELLS)
+        return [list(headers)] + [[cell(r.get(h)) for h in headers] for r in data]
     raise TableError("The JSON rows must all be objects, or all be lists")
 
 
@@ -168,7 +193,7 @@ def _ods_rows(root):
     sheet = root.find(".//" + q("table:table"))
     if sheet is None:
         raise TableError("The spreadsheet has no sheets")
-    rows = []
+    rows, room = [], Room()
     # Rows may sit inside header-row or row-group wrappers. A repeated row
     # with content (table:number-rows-repeated) is read once: LibreOffice
     # writes duplicate rows out one by one, so only empty runs are repeated.
@@ -182,6 +207,7 @@ def _ods_rows(root):
             if not v:
                 gap += n   # empty cells only count once something follows them
                 continue
+            room.take(gap + min(n, 1000))
             cells += [""] * gap + [v] * min(n, 1000)
             gap = 0
         if cells:
@@ -219,7 +245,7 @@ def _xlsx_rows(z):
 
     styles = _xlsx_styles(z)
 
-    rows = []
+    rows, room = [], Room()
     for row in ET.fromstring(_member(z, path)).iter(q("x:row")):
         cells = {}
         for i, c in enumerate(row.iter(q("x:c"))):
@@ -241,6 +267,7 @@ def _xlsx_rows(z):
             if val != "":
                 cells[col] = val
         if cells:
+            room.take(max(cells) + 1)   # a cell's column can be named far to the right
             rows.append([cells.get(i, "") for i in range(max(cells) + 1)])
     return rows
 

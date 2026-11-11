@@ -1,0 +1,15 @@
+/* The test page. Its own small sheet: the app's policy allows no styles
+   written into a page. */
+body { font: 15px/1.5 system-ui, sans-serif; color: #1c1c1c; background: #f6f5f3; margin: 0; padding: 32px 40px; max-width: 880px; }
+h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+#summary { font-size: 17px; margin: 0 0 20px; }
+#summary.pass { color: #1c6b3a; }
+#summary.fail { color: #b3261e; }
+ul { list-style: none; margin: 0; padding: 0; }
+li { padding: 6px 0; border-top: 1px solid #e2dfda; }
+li .group { color: #77736c; margin-right: 8px; font-variant: all-small-caps; letter-spacing: .04em; }
+li .why { display: block; margin-top: 2px; font: 13px/1.45 ui-monospace, monospace; color: #b3261e; white-space: pre-wrap; }
+#failures:empty { display: none; }
+#failures { margin-bottom: 20px; }
+details { margin-top: 8px; }
+summary { cursor: pointer; color: #55514b; padding: 6px 0; }

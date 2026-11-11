@@ -40,12 +40,10 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Use the newest version of every package
-        if: inputs.newest
-        run: sed -i.pinned -E 's/==.*$//' requirements.txt requirements-binary.txt
-
+      # Every download is checked against a SHA-256 in the repository, except
+      # with --newest, which takes the newest version of every package
       - name: Build
-        run: sh build.sh
+        run: sh build.sh ${{ inputs.newest && '--newest' || '' }}
 
       - name: Package versions
         run: ls vendor/*/ | grep dist-info | sed 's/\.dist-info$//'
@@ -62,3 +60,39 @@ jobs:
           name: differences-${{ matrix.os }}
           path: ${{ runner.temp }}/oh-brother-tests
           if-no-files-found: ignore
+
+  # The editor's own tests, and mistakes that tests wouldn't run into: a name
+  # used but never defined, an import left behind, a slip in a shell script,
+  # or editor code a browser couldn't read. The runner comes with shellcheck
+  # and Node; pyflakes is fetched, pinned and checked like the app's own
+  # packages.
+  lint:
+    name: Lint and editor tests
+    if: ${{ !inputs.newest }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Shell scripts
+        run: shellcheck build.sh run.sh test.sh
+
+      # Each file is read as a module, as a browser reads it. The tests are
+      # the ones the app serves at /tests/editor/ when started with --tests.
+      - name: Editor code
+        run: |
+          for f in app/static/*.mjs tests/editor/*.mjs; do node --check "$f"; done
+          node tests/editor/run.mjs
+
+      # With the app's own Python, so the code is read as the version it runs on
+      - name: Build
+        run: sh build.sh
+
+      - name: Python code
+        run: |
+          py=runtime/linux-x86_64/python/bin/python3
+          "$py" -m pip install --quiet --disable-pip-version-check --require-hashes \
+              --target "$RUNNER_TEMP/lint" -r requirements-lint.txt
+          PYTHONPATH="$RUNNER_TEMP/lint" "$py" -B -m pyflakes app tests

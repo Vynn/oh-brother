@@ -1,15 +1,25 @@
-// Oh-Brother frontend. Plain JS, no build step.
-// The server renders every preview and print. This file edits the layout
-// (all geometry in mm), draws selection and guides over the preview, and
-// handles undo, data, templates and printing.
+// Oh-Brother's editor page. Plain JavaScript modules, no build step.
+// The server renders every preview and print. This file is the page: it edits
+// the layout (all geometry in mm), draws selection and guides over the
+// preview, and handles undo, data, templates and printing. The logic that
+// needs no page is in the modules beside it, with tests in tests/editor/.
 
-"use strict";
+import * as elementOps from "./elements.mjs";
+import * as fieldOps from "./fields.mjs";
+import { fkey, lowerKeys } from "./fields.mjs";
+import * as geo from "./geometry.mjs";
+import { History } from "./history.mjs";
+import { IMAGE_MAX, sidesToTry, sizeAt } from "./images.mjs";
+import * as job from "./job.mjs";
+import { CATS, PRESETS, checkEls, imageOf, newElement, roundAll } from "./layouts.mjs";
+import { fmt, fmt2, fromUnit, imperial, nudgeStep, r2, setUnits, tapeName, toUnit, units } from "./units.mjs";
 
 const $ = (s) => document.querySelector(s);
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k.startsWith("aria-") && typeof v === "boolean") el.setAttribute(k, v);   // "true" or "false", spelled out
     else if (v === true) el.setAttribute(k, "");
     else if (v !== false && v != null) el.setAttribute(k, v);
   }
@@ -59,29 +69,11 @@ addEventListener("pagehide", save);
 const restore = () => {
   try {
     const j = JSON.parse(localStorage.getItem(STORE) || "null");
-    const layout = tidyLayout(j?.layout);
+    const layout = elementOps.tidyLayout(j?.layout, S.meta.limits.length_mm);
     if (layout) { S.layout = layout; S.fixed = lowerKeys(j.fixed); return true; }
   } catch {}
   return false;
 };
-
-// A layout from a template or this browser's storage, made safe to edit, or
-// null if it isn't a layout at all. The editor does arithmetic on every
-// element's position and size, so one saved by an older build or edited by
-// hand gets the missing pieces filled in rather than breaking the page.
-function tidyLayout(l) {
-  if (!l || typeof l !== "object" || Array.isArray(l)) return null;
-  // A number, or a default: the renderer's own, for a key that's missing or isn't one
-  const or = (v, d) => (typeof v === "number" || (typeof v === "string" && v.trim() !== "")) && Number.isFinite(+v) ? +v : d;
-  const [min, max] = S.meta.limits.length_mm;
-  const elements = (Array.isArray(l.elements) ? l.elements : [])
-    .filter((e) => e && typeof e === "object" && !Array.isArray(e))
-    .map((e) => ({ ...e, x: or(e.x, 0), y: or(e.y, 0), w: or(e.w, 10), h: or(e.h, 10),
-      ...(e.type === "text" ? { text: String(e.text ?? "") } : {}) }));
-  return { ...l, tape: typeof l.tape === "string" ? l.tape : "62red",
-    length_mm: Math.max(min, Math.min(max, or(l.length_mm, 30))),
-    orientation: l.orientation === "landscape" ? "landscape" : "portrait", elements };
-}
 
 // ---------------------------------------------------------------------------
 // Undo history: snapshots of the layout and fixed values. Every edit calls
@@ -90,28 +82,21 @@ function tidyLayout(l) {
 // own undo for that field.
 // ---------------------------------------------------------------------------
 
-const HISTORY_MAX = 100;
-let hist = [], histPos = -1, histTimer = 0, dragging = false;
+const hist = new History(100);
+let histTimer = 0, dragging = false;
 const snapshot = () => JSON.stringify({ layout: S.layout, fixed: S.fixed });
 
 function checkpoint() {
   clearTimeout(histTimer);
-  const j = snapshot();
-  if (j === hist[histPos]) return;
-  hist = hist.slice(0, histPos + 1);
-  hist.push(j);
-  if (hist.length > HISTORY_MAX) hist.shift();
-  histPos = hist.length - 1;
-  drawUndo();
+  if (hist.record(snapshot())) drawUndo();
 }
 const checkpointSoon = () => { clearTimeout(histTimer); if (!dragging) histTimer = setTimeout(checkpoint, 500); };
 
 function stepHistory(d) {
   checkpoint();   // keep any edit not yet recorded
-  const to = histPos + d;
-  if (to < 0 || to >= hist.length) return;
-  histPos = to;
-  const j = JSON.parse(hist[histPos]);
+  const to = hist.step(d);
+  if (to === null) return;
+  const j = JSON.parse(to);
   S.layout = j.layout; S.fixed = j.fixed;
   const n = S.layout.elements.length;
   S.pick = new Set([...S.pick].filter((i) => i < n));
@@ -122,8 +107,8 @@ function stepHistory(d) {
 const undo = () => stepHistory(-1), redo = () => stepHistory(1);
 
 function drawUndo() {
-  $("#undoBtn").disabled = histPos <= 0;
-  $("#redoBtn").disabled = histPos >= hist.length - 1;
+  $("#undoBtn").disabled = !hist.canUndo;
+  $("#redoBtn").disabled = !hist.canRedo;
 }
 $("#undoBtn").addEventListener("click", undo);
 $("#redoBtn").addEventListener("click", redo);
@@ -145,416 +130,17 @@ document.addEventListener("keydown", (ev) => {
 const tape = () => S.meta.tapes.find((t) => t.id === S.layout.tape) || S.meta.tapes[0];
 const dpmm = () => S.meta.dpmm;
 
-// Canvas size in mm as designed (mirrors tapes.canvas_dots on the server)
-function canvasMM() {
-  const t = tape();
-  let w = t.dots[0] / dpmm();
-  let hh = t.endless ? +S.layout.length_mm : t.dots[1] / dpmm();
-  if (S.layout.orientation === "landscape") [w, hh] = [hh, w];
-  return { w, h: hh };
-}
+// The printable canvas and the cut label around it, in mm (geometry.mjs)
+const canvasMM = () => geo.canvasMM(tape(), S.layout, dpmm());
+const paperMM = () => geo.paperMM(tape(), S.layout, dpmm());
 
-// Cut label around the printable canvas, in mm and canvas orientation:
-// side margins from the tape width, end margins from the feed (continuous)
-// or the die-cut label length.
-function paperMM() {
-  const t = tape(), c = canvasMM();
-  const across = Math.max(0, (t.tape_mm[0] - t.dots[0] / dpmm()) / 2);
-  const along = t.endless ? t.feed_mm : Math.max(0, (t.tape_mm[1] - t.dots[1] / dpmm()) / 2);
-  const [mx, my] = S.layout.orientation === "landscape" ? [along, across] : [across, along];
-  return { mx, my, w: c.w + 2 * mx, h: c.h + 2 * my };
-}
-
-const r1 = (v) => Math.round(v * 10) / 10;     // shown lengths, new elements' sizes
-const r2 = (v) => Math.round(v * 100) / 100;   // stored positions: snapped centres need 0.01 mm
-// Display units. Layouts are stored, rendered and printed in mm; inches are
-// only shown and typed. Each browser remembers its choice; mm by default.
-const UNITS = "oh-brother:units", INCH = 25.4;
-let units = "mm";
-try { if (localStorage.getItem(UNITS) === "in") units = "in"; } catch {}
-const imperial = () => units === "in";
-const toUnit = (mm) => imperial() ? Math.round(mm / INCH * 100) / 100 : r2(mm);   // input values
-const fromUnit = (v) => r2(imperial() ? v * INCH : v);
-const fmt = (mm) => imperial() ? `${(mm / INCH).toFixed(2)} in` : `${r1(mm)} mm`;
-const fmt2 = (w, hh) => imperial() ? `${(w / INCH).toFixed(2)} × ${(hh / INCH).toFixed(2)} in` : `${r1(w)} × ${r1(hh)} mm`;
-// Tape names come from the server in mm (Brother's sizes); inches are added
-const tapeName = (t) => imperial()
-  ? t.name.replace(/^([\d.]+)(?: × ([\d.]+))? mm/, (m, a, b) => `${m} (${(a / INCH).toFixed(2)}${b ? ` × ${(b / INCH).toFixed(2)}` : ""} in)`)
-  : t.name;
-
-// Snap grid: 0.5 mm, or 0.02 in (0.508 mm) in inches
-const snap = (v) => imperial() ? r2(Math.round(v / 0.508) * 0.508) : Math.round(v * 2) / 2;
+// Display units (units.mjs). Each browser remembers its choice; mm by default.
+const UNITS = "oh-brother:units";
+try { if (localStorage.getItem(UNITS) === "in") setUnits("in"); } catch {}
 
 // ---------------------------------------------------------------------------
-// Element defaults & presets
+// Quick-layout thumbnails. The layouts themselves are in layouts.mjs.
 // ---------------------------------------------------------------------------
-
-// Text defaults, for new elements and quick layouts. The renderer has its own
-// for templates that leave a key out.
-const TEXT = { font: "sans", bold: false, size: 0, align: "left", valign: "middle", wrap: true, invert: false, padding_mm: 0 };
-
-// Image defaults. The image is kept in colour, ready for a two-colour mode
-// later; for now it prints in the element's one colour.
-const IMAGE = { src: "", name: "", url: "", mode: "threshold", threshold: 50, invert: false };   // url: where it was fetched from
-const imageOf = (e) => Object.fromEntries(Object.keys(IMAGE).map((k) => [k, e[k] ?? IMAGE[k]]));   // its image settings
-
-function newElement(type) {
-  const c = canvasMM();
-  const base = { type, color: "black", x: 2, y: 2 };
-  switch (type) {
-    case "text": return { ...base, ...TEXT, w: r1(c.w - 4), h: r1(Math.min(12, c.h - 4)), text: "Text" };
-    case "qr": { const s = r1(Math.min(c.w, c.h) - 4); return { ...base, w: s, h: s, data: "{{code}}", ec: "M" }; }
-    case "barcode": return { ...base, w: r1(Math.min(c.w - 4, 50)), h: r1(Math.min(c.h - 4, 12)), data: "{{code}}", symbology: "code128", show_text: true };
-    case "rect": return { ...base, w: r1(c.w - 4), h: 1, fill: true, stroke_mm: 0.5 };
-    case "image": { const s = r1(Math.min(20, Math.min(c.w, c.h) - 4)); return { ...base, ...IMAGE, w: s, h: s }; }
-  }
-}
-
-const T = (o) => ({ type: "text", color: "black", ...TEXT, ...o });
-
-// Quick layouts. make(W, H) builds the elements for a printable area of W x H
-// mm, picking an arrangement from its shape: "thin" labels (long strips, such
-// as 12 mm tape run along) put parts side by side; "tall" ones stack them.
-// fits(W, H, red) returns "" or the reason the layout can't work at that size
-// (or tape); without one, the built elements are checked by checkEls().
-// cat is the layout's category in the panel (CATS).
-// Field names are shared ({{title}}, {{body}}, {{code}}, {{price}}) so values carry over
-// when switching layouts.
-
-// Margin scales with the short side: 2 mm on 62 mm tape, 0.5 mm on 12 mm
-const marginFor = (W, H) => Math.max(0.5, Math.min(2, Math.round(Math.min(W, H) * 0.14) / 2));
-const shapeOf = (W, H) => W / H >= 2.8 ? "thin" : H / W >= 1.4 ? "tall" : "normal";
-const QR = (o) => ({ type: "qr", color: "black", data: "{{code}}", ec: "M", ...o });
-const BAR = (o) => ({ type: "barcode", color: "black", data: "{{code}}", symbology: "code128", show_text: true, ...o });
-
-const RULE = (o) => ({ type: "rect", color: "black", fill: true, stroke_mm: 0.3, ...o });
-const IMG = (o) => ({ type: "image", color: "black", ...IMAGE, ...o });
-
-// Generic size check for a built layout: scannable codes, readable text
-function checkEls(els) {
-  for (const e of els) {
-    if (e.type === "qr" && e.w < 7) return "Too small for a scannable QR code";
-    if (e.type === "barcode" && e.w < 20) return "Needs a longer label for a barcode";
-    if (e.type === "barcode" && e.h < 5) return "Needs a taller label for a barcode";
-    if (e.type === "text" && (e.h < 2 || e.w < 5)) return "Needs a larger label";
-  }
-  return "";
-}
-const NEEDS_RED = "Needs black and red tape (DK-2251)";
-
-// Price tags: the plain ones are black; the sale ones add a red SALE banner
-// and a red price. Fields: {{title}}, {{price}}, {{code}} (the SKU).
-function priceTag(code, sale) {
-  const qr = code === "qr";
-  const price = (o) => T({ text: "{{price}}", bold: true, align: "center", wrap: false, ...(sale ? { color: "red" } : {}), ...o });
-  const sku = (o) => T({ text: "SKU {{code}}", size: 0, wrap: false, ...o });
-  const banner = (o) => T({ text: "SALE", bold: true, align: "center", invert: true, color: "red", wrap: false, ...o });
-  const make = (W, H, m = marginFor(W, H)) => {
-    const els = [];
-    if (shapeOf(W, H) === "thin") {
-      // Left to right: [SALE] | title | price | code
-      let x = 0;
-      if (sale) { const bw = Math.min(W * 0.16, H * 1.8); els.push(banner({ x: 0, y: 0, w: bw, h: H, padding_mm: Math.min(1, m) })); x = bw; }
-      x += m;
-      const ih = H - 2 * m, avail = W - x - m;
-      const cw = qr ? ih : Math.min(avail * 0.42, 50);
-      const text = avail - cw - 2 * m, tw = text * 0.55, pw = text - tw;
-      // The SKU goes under the title: text under the bars would be too small
-      els.push(T({ x, y: m, w: tw, h: ih * 0.62, text: "{{title}}", bold: true }),
-        sku({ x, y: m + ih * 0.62, w: tw, h: ih * 0.38 }),
-        price({ x: x + tw + m, y: m, w: pw, h: ih }));
-      const cx = W - m - cw;
-      els.push(qr ? QR({ x: cx, y: m, w: cw, h: cw }) : BAR({ x: cx, y: m, w: cw, h: ih, show_text: false }));
-      return els;
-    }
-    let top = m;
-    if (sale) { const bh = Math.min(Math.max(H * 0.18, 4), 9); els.push(banner({ x: 0, y: 0, w: W, h: bh })); top = bh + m; }
-    const ih = H - top - m, iw = W - 2 * m;
-    if (shapeOf(W, H) === "tall") {
-      // Stacked: title, price, code, SKU
-      const th = ih * 0.2, ph = ih * 0.22, sh = ih * 0.1;
-      const ch = ih - th - ph - sh - 3 * m;
-      let y = top;
-      els.push(T({ x: m, y, w: iw, h: th, text: "{{title}}", bold: true, align: "center" })); y += th + m;
-      els.push(price({ x: m, y, w: iw, h: ph })); y += ph + m;
-      if (qr) { const s = Math.min(iw, ch); els.push(QR({ x: (W - s) / 2, y, w: s, h: s })); }
-      else els.push(BAR({ x: m, y, w: iw, h: Math.min(ch, 15), show_text: false }));
-      y += ch + m;
-      els.push(sku({ x: m, y, w: iw, h: sh, align: "center" }));
-      return els;
-    }
-    if (qr) {
-      // QR code down the right; title, price and SKU stacked beside it
-      const s = Math.min(ih, W * 0.4), tw = iw - s - m;
-      els.push(T({ x: m, y: top, w: tw, h: ih * 0.32, text: "{{title}}", bold: true }),
-        price({ x: m, y: top + ih * 0.34, w: tw, h: ih * 0.44, align: "left" }),
-        sku({ x: m, y: top + ih * 0.8, w: tw, h: ih * 0.2 }),
-        QR({ x: W - m - s, y: top + (ih - s) / 2, w: s, h: s }));
-      return els;
-    }
-    // Title across the top, price and barcode side by side, SKU at the bottom
-    const th = ih * 0.28, sh = ih * 0.16, mh = ih - th - sh - 2 * m;
-    const pw = iw * 0.38;
-    els.push(T({ x: m, y: top, w: iw, h: th, text: "{{title}}", bold: true }),
-      price({ x: m, y: top + th + m, w: pw, h: mh, align: "left" }),
-      BAR({ x: 2 * m + pw, y: top + th + m, w: iw - pw - m, h: mh, show_text: false }),
-      sku({ x: m, y: top + th + mh + 2 * m, w: iw, h: sh }));
-    return els;
-  };
-  return { name: `${sale ? "Sale" : "Price"} tag + ${qr ? "QR" : "barcode"}`, cat: "retail", make,
-    fits: (W, H, red) => sale && !red ? NEEDS_RED
-      : shapeOf(W, H) !== "thin" && Math.min(W, H) < 20 ? "Needs a larger label" : checkEls(make(W, H)) };
-}
-
-// Layered shelf tag: a glyph (an image) and category across the top, the price in an
-// outlined box at the right, then the product name, large, and a smaller
-// variant line. Fields: {{category}}, {{title}}, {{variant}}, {{price}}, and
-// {{note}} under the price, such as a bulk discount. Empty ones are hidden.
-const layeredShelfTag = {
-  name: "Layered shelf tag", cat: "retail",
-  make: (W, H, m = marginFor(W, H)) => {
-    const iw = W - 2 * m, ih = H - 2 * m, gap = Math.max(0.5, m / 2);
-    const line = (o) => T({ wrap: false, ...o });
-    const priceBox = (x, y, w, bh) => {
-      const p = Math.min(1, bh * 0.08), ph = (bh - 2 * p) * 0.68;
-      return [{ type: "rect", color: "black", fill: false, stroke_mm: 0.3, x, y, w, h: bh },
-        line({ x: x + p, y: y + p, w: w - 2 * p, h: ph, text: "{{price}}", align: "center" }),
-        line({ x: x + p, y: y + p + ph, w: w - 2 * p, h: bh - 2 * p - ph, text: "{{note}}", align: "center" })];
-    };
-    if (shapeOf(W, H) === "thin") {
-      // Left to right: glyph | category, name and variant stacked | price box
-      const g = ih, pw = Math.min(iw * 0.3, ih * 2.6), tx = m + g + gap, tw = iw - g - pw - 2 * gap;
-      return [IMG({ x: m, y: m, w: g, h: g }),
-        line({ x: tx, y: m, w: tw, h: ih * 0.28, text: "{{category}}" }),
-        line({ x: tx, y: m + ih * 0.28, w: tw, h: ih * 0.46, text: "{{title}}" }),
-        line({ x: tx, y: m + ih * 0.74, w: tw, h: ih * 0.26, text: "{{variant}}" }),
-        ...priceBox(W - m - pw, m, pw, ih)];
-    }
-    if (shapeOf(W, H) === "tall") {
-      // Stacked: glyph and category, name, variant, and the price box across the bottom
-      const g = ih * 0.18, nh = ih * 0.2, vh = ih * 0.12, ph = ih * 0.3, ny = m + g + gap;
-      return [IMG({ x: m, y: m, w: g, h: g }),
-        line({ x: m + g + gap, y: m + g * 0.14, w: iw - g - gap, h: g * 0.72, text: "{{category}}" }),
-        line({ x: m, y: ny, w: iw, h: nh, text: "{{title}}" }),
-        line({ x: m, y: ny + nh, w: iw, h: vh, text: "{{variant}}" }),
-        ...priceBox(m, H - m - ph, iw, ph)];
-    }
-    // As on a shop shelf: the top band holds the glyph and category at the
-    // left and the price box at the right; the name and variant run below
-    const bh = ih * 0.44, pw = iw * 0.4, g = bh * 0.8;
-    const cx = m + g + gap, nh = ih * 0.3, ny = m + bh + gap;
-    return [IMG({ x: m, y: m + (bh - g) / 2, w: g, h: g }),
-      line({ x: cx, y: m + (bh - g * 0.72) / 2, w: W - m - pw - gap - cx, h: g * 0.72, text: "{{category}}" }),
-      ...priceBox(W - m - pw, m, pw, bh),
-      line({ x: m, y: ny, w: iw, h: nh, text: "{{title}}" }),
-      line({ x: m, y: ny + nh, w: iw, h: H - m - ny - nh, text: "{{variant}}" })];
-  },
-  fits: (W, H) => shapeOf(W, H) === "thin" ? (H < 8.5 ? "Needs wider tape" : checkEls(layeredShelfTag.make(W, H)))
-    : Math.min(W, H) < 18 ? "Needs a larger label" : checkEls(layeredShelfTag.make(W, H)),
-};
-
-// Quick-layout categories, in panel order
-const CATS = [["basic", "Basic"], ["storage", "Storage and inventory"], ["dates", "Dates and tracking"],
-  ["cables", "Cables and mailing"], ["retail", "Retail"]];
-
-const PRESETS = [
-  // ---- Basic ----
-  { name: "Single line", cat: "basic",
-    fits: () => "",
-    make: (W, H, m = marginFor(W, H)) => [
-      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{title}}", bold: true, align: "center", wrap: false })] },
-
-  { name: "Title + body", cat: "basic",
-    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
-    make: (W, H, m = marginFor(W, H)) => {
-      if (shapeOf(W, H) === "thin") {
-        const tw = (W - 3 * m) * 0.4;
-        return [
-          T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{title}}", bold: true }),
-          T({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m, text: "{{body}}" })];
-      }
-      return [
-        T({ x: m, y: m, w: W - 2 * m, h: (H - 2 * m) * 0.4, text: "{{title}}", bold: true }),
-        T({ x: m, y: m + (H - 2 * m) * 0.45, w: W - 2 * m, h: (H - 2 * m) * 0.55, text: "{{body}}", valign: "top" })];
-    } },
-
-  { name: "Red header", cat: "basic",
-    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 30 ? "Needs a longer label" : "") : (H < 12 || W < 15 ? "Needs a larger label" : ""),
-    make: (W, H, m = marginFor(W, H)) => {
-      const head = { text: "{{title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
-      if (shapeOf(W, H) === "thin") {
-        // Red block at the start of the strip
-        const bw = W * 0.35;
-        return [T({ ...head, x: 0, y: 0, w: bw, h: H }), T({ x: bw + m, y: m, w: W - bw - 2 * m, h: H - 2 * m, text: "{{body}}" })];
-      }
-      const bh = Math.min(H * 0.32, W * 0.3);
-      return [T({ ...head, x: 0, y: 0, w: W, h: bh }), T({ x: m, y: bh + m, w: W - 2 * m, h: H - bh - 2 * m, text: "{{body}}" })];
-    } },
-
-  { name: "Two columns", cat: "basic",
-    fits: (W, H) => shapeOf(W, H) === "tall" ? (H < 16 ? "Needs a larger label" : "") : (W < 20 ? "Needs a wider label" : ""),
-    make: (W, H, m = marginFor(W, H)) => {
-      const col = { bold: true, align: "center" }, rule = 0.3;
-      if (shapeOf(W, H) === "tall") {
-        // Narrow labels: two rows with a rule between
-        const rh = (H - 4 * m - rule) / 2;
-        return [T({ ...col, x: m, y: m, w: W - 2 * m, h: rh, text: "{{title}}" }),
-          RULE({ x: m, y: (H - rule) / 2, w: W - 2 * m, h: rule }),
-          T({ ...col, x: m, y: H - m - rh, w: W - 2 * m, h: rh, text: "{{body}}" })];
-      }
-      const cw = (W - 4 * m - rule) / 2;
-      return [T({ ...col, x: m, y: m, w: cw, h: H - 2 * m, text: "{{title}}" }),
-        RULE({ x: (W - rule) / 2, y: m, w: rule, h: H - 2 * m }),
-        T({ ...col, x: W - m - cw, y: m, w: cw, h: H - 2 * m, text: "{{body}}" })];
-    } },
-
-  // ---- Storage and inventory ----
-  { name: "Text + QR", cat: "storage",
-    fits: (W, H) => {
-      const m = marginFor(W, H);
-      const s = shapeOf(W, H) === "tall" ? Math.min(W - 2 * m, H * 0.6) : Math.min(H - 2 * m, W * 0.45);
-      return s < 7 ? "Too small for a scannable QR code" : "";
-    },
-    make: (W, H, m = marginFor(W, H)) => {
-      if (shapeOf(W, H) === "tall") {
-        // Text on top, QR code centred below
-        const s = Math.min(W - 2 * m, H * 0.6);
-        return [T({ x: m, y: m, w: W - 2 * m, h: H - s - 3 * m, text: "{{title}}", bold: true, align: "center" }),
-          QR({ x: (W - s) / 2, y: H - s - m, w: s, h: s })];
-      }
-      const s = Math.min(H - 2 * m, W * 0.45);
-      return [T({ x: m, y: m, w: W - s - 3 * m, h: H - 2 * m, text: "{{title}}", bold: true }),
-        QR({ x: W - s - m, y: (H - s) / 2, w: s, h: s })];
-    } },
-
-  { name: "Barcode", cat: "storage",
-    fits: (W, H) => {
-      const m = marginFor(W, H), thin = shapeOf(W, H) === "thin";
-      const bw = thin ? (W - 3 * m) * 0.7 : W - 2 * m;
-      return bw < 20 ? "Needs a wider label for a barcode" : (thin ? H : H * 0.6) < 7 ? "Needs a taller label for a barcode" : "";
-    },
-    make: (W, H, m = marginFor(W, H)) => {
-      if (shapeOf(W, H) === "thin") {
-        const tw = (W - 3 * m) * 0.3;
-        return [T({ x: m, y: m, w: tw, h: H - 2 * m, text: "{{title}}", bold: true }),
-          BAR({ x: 2 * m + tw, y: m, w: W - 3 * m - tw, h: H - 2 * m })];
-      }
-      // Title above the barcode; on tall labels both keep sensible heights
-      const ih = H - 2 * m;
-      const th = Math.min(ih * 0.3, 12), bh = Math.min(ih - th - m, (W - 2 * m) * 0.5);
-      const y0 = m + (ih - th - m - bh) / 2;
-      return [T({ x: m, y: y0, w: W - 2 * m, h: th, text: "{{title}}", bold: true, align: "center" }),
-        BAR({ x: m, y: y0 + th + m, w: W - 2 * m, h: bh })];
-    } },
-
-  { name: "QR only", cat: "storage",
-    make: (W, H, m = marginFor(W, H)) => {
-      const ih = H - 2 * m, iw = W - 2 * m;
-      if (W / H >= 1.5) {
-        // Wide: QR code at the start, caption beside it
-        const s = Math.min(ih, iw * 0.6);
-        return [QR({ x: m, y: (H - s) / 2, w: s, h: s }),
-          T({ x: 2 * m + s, y: m, w: iw - s - m, h: ih, text: "{{title}}", size: 0 })];
-      }
-      // Caption under the QR code, the pair centred
-      const ch = Math.max(3, ih * 0.16), s = Math.min(iw, ih - ch - m);
-      const y0 = m + (ih - s - m - ch) / 2;
-      return [QR({ x: (W - s) / 2, y: y0, w: s, h: s }),
-        T({ x: m, y: y0 + s + m, w: iw, h: ch, text: "{{title}}", align: "center", wrap: false })];
-    } },
-
-  { name: "Bin label", cat: "storage",
-    make: (W, H, m = marginFor(W, H)) => {
-      const ih = H - 2 * m, iw = W - 2 * m, rule = 0.3;
-      // A small location line over a rule, the item name below
-      const stack = (x, y, w, hh) => {
-        const bh = hh * 0.3;
-        return [T({ x, y, w, h: bh, text: "{{body}}", wrap: false }),
-          RULE({ x, y: y + bh + m / 2, w, h: rule }),
-          T({ x, y: y + bh + m + rule, w, h: hh - bh - m - rule, text: "{{title}}", bold: true })];
-      };
-      if (shapeOf(W, H) === "tall") {
-        const s = Math.min(iw, H * 0.5);
-        return [...stack(m, m, iw, ih - s - m), QR({ x: (W - s) / 2, y: H - m - s, w: s, h: s })];
-      }
-      if (shapeOf(W, H) === "thin" && H < 14) {
-        // Too low to stack: item name, a rule, the location, then the QR code
-        const tw = (iw - ih - 3 * m - rule) * 0.6, bx = 3 * m + tw + rule;
-        return [T({ x: m, y: m, w: tw, h: ih, text: "{{title}}", bold: true }),
-          RULE({ x: 2 * m + tw, y: m, w: rule, h: ih }),
-          T({ x: bx, y: m, w: W - 2 * m - ih - bx, h: ih, text: "{{body}}" }),
-          QR({ x: W - m - ih, y: m, w: ih, h: ih })];
-      }
-      const s = Math.min(ih, W * 0.4);
-      return [...stack(m, m, iw - s - m, ih), QR({ x: W - m - s, y: (H - s) / 2, w: s, h: s })];
-    } },
-
-  // ---- Dates and tracking ----
-  { name: "Date stamp", cat: "dates",
-    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 25 ? "Needs a longer label" : "") : (H < 8 ? "Needs a larger label" : ""),
-    make: (W, H, m = marginFor(W, H)) => {
-      const ih = H - 2 * m, iw = W - 2 * m, date = { text: "Opened {{date}}", wrap: false };
-      if (shapeOf(W, H) === "thin") {
-        const tw = (iw - m) * 0.55;
-        return [T({ x: m, y: m, w: tw, h: ih, text: "{{title}}", bold: true }),
-          T({ ...date, x: 2 * m + tw, y: m, w: iw - tw - m, h: ih, align: "right" })];
-      }
-      const th = (ih - m) * 0.6;
-      return [T({ x: m, y: m, w: iw, h: th, text: "{{title}}", bold: true }),
-        T({ ...date, x: m, y: 2 * m + th, w: iw, h: ih - th - m })];
-    } },
-
-  { name: "Filament spool", cat: "dates",
-    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 14 || W < 20 ? "Needs a larger label" : ""),
-    make: (W, H, m = marginFor(W, H)) => {
-      // Material in a red band, colour below it, drying date last
-      const band = { text: "{{title}}", bold: true, align: "center", invert: true, color: "red", padding_mm: Math.min(1, m), wrap: false };
-      const date = { text: "Dried {{date}}", wrap: false };
-      if (shapeOf(W, H) === "thin") {
-        const bw = W * 0.28, rest = W - bw - 3 * m, cw = rest * 0.5;
-        return [T({ ...band, x: 0, y: 0, w: bw, h: H }),
-          T({ x: bw + m, y: m, w: cw, h: H - 2 * m, text: "{{body}}" }),
-          T({ ...date, x: bw + 2 * m + cw, y: m, w: rest - cw, h: H - 2 * m, align: "right" })];
-      }
-      const bh = Math.min(H * 0.35, W * 0.3), rest = H - bh - 3 * m;
-      return [T({ ...band, x: 0, y: 0, w: W, h: bh }),
-        T({ x: m, y: bh + m, w: W - 2 * m, h: rest * 0.6, text: "{{body}}", bold: true }),
-        T({ ...date, x: m, y: bh + 2 * m + rest * 0.6, w: W - 2 * m, h: rest * 0.4 })];
-    } },
-
-  // ---- Cables and mailing ----
-  { name: "Cable flag", cat: "cables",
-    fits: (W, H) => Math.max(W, H) < 45 ? `Needs a label at least ${fmt(45)} long` : "",
-    make: (W, H, m = marginFor(W, H)) => {
-      // The same text on both halves; the blank middle wraps around the
-      // cable (15 mm suits cables up to about 4.5 mm across) and the halves
-      // stick together back to back
-      const WRAP = 15, along = W >= H, L = along ? W : H, half = (L - WRAP) / 2;
-      const t = { text: "{{title}}", bold: true, align: "center" };
-      return [0, half + WRAP].map((p) => along
-        ? T({ ...t, x: p + m, y: m, w: half - 2 * m, h: H - 2 * m })
-        : T({ ...t, x: m, y: p + m, w: W - 2 * m, h: half - 2 * m }));
-    } },
-
-  { name: "Address", cat: "cables",
-    fits: (W, H) => H < 14 || W < 25 ? "Needs a larger label" : "",
-    make: (W, H, m = marginFor(W, H)) => [
-      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, text: "{{name}}\n{{street}}\n{{city}} {{postcode}}\n{{country}}", valign: "top", wrap: false })] },
-
-  { name: "Return address", cat: "cables",
-    fits: (W, H) => shapeOf(W, H) === "thin" ? (W < 40 ? "Needs a longer label" : "") : (H < 8 || W < 20 ? "Needs a larger label" : ""),
-    make: (W, H, m = marginFor(W, H)) => [
-      T({ x: m, y: m, w: W - 2 * m, h: H - 2 * m, wrap: false, size: 0,
-        text: shapeOf(W, H) === "thin" ? "{{name}} · {{street}} · {{city}} {{postcode}}" : "{{name}}\n{{street}}\n{{city}} {{postcode}}" })] },
-
-  // ---- Retail ----
-  priceTag("barcode", false), priceTag("qr", false), priceTag("barcode", true), priceTag("qr", true), layeredShelfTag,
-];
-
-// 0.01 mm, so full-width preset elements line up exactly with the label edges
-function roundAll(els) {
-  return els.map((e) => ({ ...e, x: r2(e.x), y: r2(e.y), w: r2(e.w), h: r2(e.h) }));
-}
 
 // Thumbnail: the preset as built for the current label (W x H mm), with text
 // drawn as bars. Strokes and bar heights scale with the label.
@@ -603,69 +189,14 @@ function presetThumb(p, W, H) {
 // Data records
 // ---------------------------------------------------------------------------
 
-// The {{field}} pattern and the built-in fields come from the server
-// (/api/meta), so the editor finds fields exactly as the server fills them
-const tags = (text) => text.matchAll(new RegExp(S.meta.field_pattern, "g"));
-
-// Field names are case-insensitive: {{Code}} and {{code}} are one field.
-// Values and column choices are stored under the lowercase key; the Data
-// table shows the name as first spelled in the layout.
-const fkey = (p) => p.toLowerCase();
-
-// Re-key a {name: value} object by lowercase name (older templates and saved
-// state used the spelling). Where two spellings collide, the first value set wins.
-function lowerKeys(obj) {
-  const out = {};
-  for (const [k, v] of Object.entries(obj && typeof obj === "object" ? obj : {})) {
-    const key = fkey(k);
-    if (!(key in out) || (out[key] === "" && v !== "")) out[key] = v;
-  }
-  return out;
-}
-
-// A field takes fixed text unless data is loaded and it's mapped to a column
-const isFixed = (p) => !(S.data && S.mapping[fkey(p)]);
-
-// The layout's fields, plus any field named inside a fixed value, so that
-// {{code}} = "{{item}}" gives Item a row even when the layout doesn't use it.
-// Data column names are left out: those come straight from the row.
-function fields() {
-  const out = [...S.placeholders], keys = new Set(out.map(fkey));
-  const cols = new Set((S.data?.headers || []).map(fkey));
-  for (let i = 0; i < out.length; i++) {
-    if (!isFixed(out[i])) continue;
-    for (const m of tags(S.fixed[fkey(out[i])] || "")) {
-      const k = fkey(m[1]);
-      if (!keys.has(k) && !S.meta.builtin_fields.includes(k) && !cols.has(k)) { keys.add(k); out.push(m[1]); }
-    }
-  }
-  return out;
-}
-
-// Fields whose fixed values may themselves contain {{tags}} (sent as "chain")
-const chain = () => fields().filter(isFixed);
-
-// Build the field->value record for one data row (or fixed values only). The
-// row's own columns go in first, so a fixed value can refer to any column.
-function record(row) {
-  const rec = row ? { ...row } : {};
-  for (const p of fields()) {
-    rec[p] = isFixed(p) ? (S.fixed[fkey(p)] ?? "") : (row?.[S.mapping[fkey(p)]] ?? "");
-  }
-  return rec;
-}
+// Fields and the values that fill them are worked out in fields.mjs, from the
+// state here
+const fields = () => fieldOps.fields(S);
+const chain = () => fieldOps.chain(S);
+const record = (row) => fieldOps.record(S, row);
+const autoMap = () => fieldOps.autoMap(S);
 
 const previewRecord = () => record(S.data ? S.data.rows[S.cur] : null);
-
-function autoMap() {
-  if (!S.data) return;
-  for (const p of fields()) {
-    const m = S.mapping[fkey(p)];
-    if (m !== undefined && (m === "" || S.data.headers.includes(m))) continue;
-    const hit = S.data.headers.find((c) => fkey(c) === fkey(p));
-    S.mapping[fkey(p)] = hit || "";
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Preview rendering
@@ -749,11 +280,18 @@ function drawOverlay() {
   // Rebuild only when the element count changes. Otherwise update in place,
   // so a box being dragged is never replaced under the pointer.
   if (ov.children.length !== els.length) {
-    ov.replaceChildren(...els.map((_, i) => h("div", { class: "box", "data-i": i },
+    // Each box takes keyboard focus (Tab), which selects it. If one had focus,
+    // focus goes to the element now selected, or to the one in its place.
+    const had = ov.contains(document.activeElement) ? +document.activeElement.dataset.i : -1;
+    ov.replaceChildren(...els.map((_, i) => h("div", { class: "box", "data-i": i, tabindex: 0, role: "button" },
       ...HANDLES.map((d) => h("div", { class: `handle ${d}${d.length === 1 ? " edge" : ""}`, "data-h": d })))));
+    if (had >= 0) ov.children[S.sel >= 0 ? S.sel : Math.min(had, els.length - 1)]?.focus();
   }
   els.forEach((e, i) => placeBox(ov.children[i], e, i));
 }
+
+// An element in words, for a screen reader: "Text: {{title}}, red"
+const describe = (e) => `${KIND[e.type]}: ${summary(e) || "empty"}${e.color === "red" ? ", red" : ""}`;
 
 function placeBox(box, e, i) {
   const k = dpmm() * S.scale, w = e.w * k, hh = e.h * k;
@@ -771,38 +309,15 @@ function placeBox(box, e, i) {
       : `${e.type === "qr" ? "QR" : "Barcode"} · ${why === "invalid" ? "invalid data" : "no data"}`;
   } else delete box.dataset.blank;
   box.style.cssText = `left:${e.x * k}px;top:${e.y * k}px;width:${w}px;height:${hh}px`;
+  box.setAttribute("aria-label", describe(e));
+  box.setAttribute("aria-pressed", S.pick.has(i));
 }
 
 // Bounding box (mm) of the given element indexes
-function bounds(idx) {
-  const els = idx.map((i) => S.layout.elements[i]);
-  const l = Math.min(...els.map((e) => e.x)), t = Math.min(...els.map((e) => e.y));
-  const r = Math.max(...els.map((e) => e.x + e.w)), b = Math.max(...els.map((e) => e.y + e.h));
-  return { l, t, r, b };
-}
+const bounds = (idx) => geo.bounds(idx.map((i) => S.layout.elements[i]));
 
-// Snap lines in mm: the printable area's edges and centre, and the edges and
-// centre of every element not being dragged
-function snapTargets(skip) {
-  const c = canvasMM();
-  const xs = [0, c.w / 2, c.w], ys = [0, c.h / 2, c.h];
-  S.layout.elements.forEach((o, j) => {
-    if (skip.has(j)) return;
-    xs.push(o.x, o.x + o.w / 2, o.x + o.w);
-    ys.push(o.y, o.y + o.h / 2, o.y + o.h);
-  });
-  return { xs, ys };
-}
-
-// Closest target to any of the points, within thr: {d: offset, at: target}
-function nearest(points, targets, thr) {
-  let best = null;
-  for (const p of points) for (const t of targets) {
-    const d = t - p;
-    if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, at: t };
-  }
-  return best;
-}
+// Snap lines in mm, leaving out the elements being dragged
+const snapTargets = (skip) => geo.snapTargets(S.layout.elements, skip, canvasMM());
 
 function drawGuides(gx = [], gy = []) {
   const k = dpmm() * S.scale, c = canvasMM(), ext = 10;
@@ -863,27 +378,8 @@ $("#overlay").addEventListener("pointerdown", (ev) => {
     const s0 = { l: e.x, t: e.y, r: e.x + e.w, b: e.y + e.h };
     const targets = snapTargets(new Set([i]));
     track(box, ev, (m) => {
-      const dx = (m.clientX - start.x) / k, dy = (m.clientY - start.y) / k, thr = thrOf(m);
-      let gx = [], gy = [];
-      const edge = (v, list, guides) => {
-        if (!thr) return v;
-        const s = nearest([v], list, thr);
-        if (s) { guides.push(s.at); return s.at; }
-        return snap(v);
-      };
-      let { l, t, r, b } = s0;
-      if (hd.includes("w")) l = Math.min(edge(l + dx, targets.xs, gx), r - 1);
-      if (hd.includes("e")) r = Math.max(edge(r + dx, targets.xs, gx), l + 1);
-      if (hd.includes("n")) t = Math.min(edge(t + dy, targets.ys, gy), b - 0.5);
-      if (hd.includes("s")) b = Math.max(edge(b + dy, targets.ys, gy), t + 0.5);
-      if (e.type === "qr") {
-        // Square, anchored at the opposite corner; keep only guides still on an edge
-        const s = Math.max(r - l, b - t);
-        if (hd.includes("w")) l = r - s; else r = l + s;
-        if (hd.includes("n")) t = b - s; else b = t + s;
-        gx = gx.filter((v) => Math.abs(v - l) < 1e-6 || Math.abs(v - r) < 1e-6);
-        gy = gy.filter((v) => Math.abs(v - t) < 1e-6 || Math.abs(v - b) < 1e-6);
-      }
+      const dx = (m.clientX - start.x) / k, dy = (m.clientY - start.y) / k;
+      const { l, t, r, b, gx, gy } = geo.resizeBox(s0, hd, dx, dy, targets, thrOf(m), e.type === "qr");
       e.x = r2(l); e.y = r2(t); e.w = r2(r - l); e.h = r2(b - t);
       placeBox(box, e, i);
       drawGuides(gx, gy);
@@ -897,15 +393,10 @@ $("#overlay").addEventListener("pointerdown", (ev) => {
   // left/centre/right and top/middle/bottom lines.
   const idx = picked();
   const orig = idx.map((j) => ({ x: S.layout.elements[j].x, y: S.layout.elements[j].y }));
-  const b0 = bounds(idx), bw = b0.r - b0.l, bh = b0.b - b0.t;
+  const b0 = bounds(idx);
   const targets = snapTargets(new Set(idx));
   track(box, ev, (m) => {
-    const thr = thrOf(m), gx = [], gy = [];
-    let x = b0.l + (m.clientX - start.x) / k, y = b0.t + (m.clientY - start.y) / k;
-    const sx = thr && nearest([x, x + bw / 2, x + bw], targets.xs, thr);
-    const sy = thr && nearest([y, y + bh / 2, y + bh], targets.ys, thr);
-    if (sx) { x += sx.d; gx.push(sx.at); } else if (thr) x = snap(x);
-    if (sy) { y += sy.d; gy.push(sy.at); } else if (thr) y = snap(y);
+    const { x, y, gx, gy } = geo.moveBox(b0, (m.clientX - start.x) / k, (m.clientY - start.y) / k, targets, thrOf(m));
     idx.forEach((j, n) => {
       const e = S.layout.elements[j];
       e.x = r2(orig[n].x + x - b0.l); e.y = r2(orig[n].y + y - b0.t);
@@ -942,17 +433,8 @@ function marquee(ev, k) {
   });
 }
 
-// Align: one element to the printable area; several to their own bounding
-// box or to the printable area (S.alignTo)
-const ALIGN = [
-  ["left", "Align left", (e, R) => { e.x = R.l; }],
-  ["hcenter", "Centre horizontally", (e, R) => { e.x = (R.l + R.r - e.w) / 2; }],
-  ["right", "Align right", (e, R) => { e.x = R.r - e.w; }],
-  null,
-  ["top", "Align top", (e, R) => { e.y = R.t; }],
-  ["vcenter", "Centre vertically", (e, R) => { e.y = (R.t + R.b - e.h) / 2; }],
-  ["bottom", "Align bottom", (e, R) => { e.y = R.b - e.h; }],
-];
+// Align (geometry.mjs's ALIGN): one element to the printable area; several to
+// their own bounding box or to the printable area (S.alignTo)
 
 const svgIcon = (draw) => {
   const ns = "http://www.w3.org/2000/svg";
@@ -994,58 +476,112 @@ function distIcon(vert) {
 }
 
 function alignRow() {
-  return h("div", { class: "align" }, ...ALIGN.map((a) => !a ? h("span", { class: "gap" }) :
+  return h("div", { class: "align" }, ...geo.ALIGN.map((a) => !a ? h("span", { class: "gap" }) :
     h("button", { type: "button", class: "icon", title: a[1], onclick: () => {
       const idx = picked(), c = canvasMM();
       const R = idx.length > 1 && S.alignTo === "selection" ? bounds(idx) : { l: 0, t: 0, r: c.w, b: c.h };
-      for (const i of idx) {
-        const e = S.layout.elements[i];
-        a[2](e, R);
-        e.x = r2(e.x); e.y = r2(e.y);
-      }
+      geo.alignEls(pickedEls(), a, R);
       drawProps(true); schedule();
     } }, alignIcon(a[0]))));
 }
 
 // Distribute: equal gaps between three or more elements; the two outermost stay put
 function distribute(vert) {
-  const [p, s] = vert ? ["y", "h"] : ["x", "w"];
-  const els = picked().map((i) => S.layout.elements[i]).sort((a, b) => a[p] - b[p]);
-  if (els.length < 3) return;
-  const first = els[0], end = Math.max(...els.map((e) => e[p] + e[s]));
-  const gap = (end - first[p] - els.reduce((n, e) => n + e[s], 0)) / (els.length - 1);
-  let at = first[p] + first[s] + gap;
-  for (const e of els.slice(1, -1)) { e[p] = r2(at); at += e[s] + gap; }
+  if (S.pick.size < 3) return;
+  geo.distribute(pickedEls(), vert);
   schedule();
 }
 
-// Keyboard: nudge with arrows (0.5 mm, Shift = 2 mm; in inches 0.02 in,
-// Shift = 0.1 in), Delete or Backspace removes, Escape deselects, Ctrl+A
-// selects all
+// Copy, cut and paste elements. What's copied is kept in this browser's
+// storage rather than the system clipboard, which a page may read only with
+// permission: so it pastes into any window of the app, and nowhere else.
+const CLIP = "oh-brother:clipboard";
+let clip = "", pastes = 0;   // the copied elements as JSON, and how often they've been pasted here
+
+function copyPicked() {
+  if (!S.pick.size) return false;
+  clip = JSON.stringify(elementOps.copyEls(S.layout.elements, picked()));
+  pastes = 0;
+  try { localStorage.setItem(CLIP, clip); } catch {}
+  return true;
+}
+
+function cutPicked() {
+  if (!copyPicked()) return false;
+  removeEls(picked());
+  return true;
+}
+
+function pasteCopied() {
+  let j = clip;
+  try { j = localStorage.getItem(CLIP) || clip; } catch {}
+  let els = [];
+  try { els = elementOps.tidyElements(JSON.parse(j || "[]")).filter((e) => e.type in KIND); } catch {}
+  if (!els.length) return false;
+  if (j !== clip) { clip = j; pastes = 0; }   // copied in another window since
+  // Each paste lands a step further from the original, so none hides another
+  const added = elementOps.pasteEls(S.layout.elements, els, canvasMM(), { shift: ++pastes * elementOps.COPY_OFFSET, red: tape().red });
+  listAt = Math.max(...added);
+  setPick(added); schedule();
+  return true;
+}
+
+// Ctrl or Cmd with a letter. Each returns whether it did anything, so a key
+// with nothing to act on keeps its meaning in the browser.
+const SHORTCUTS = {
+  a: () => { setPick(new Set(S.layout.elements.map((_, i) => i))); return true; },
+  c: copyPicked,
+  x: cutPicked,
+  v: pasteCopied,
+  d: () => { if (!S.pick.size) return false; dupEls(picked()); return true; },
+};
+
+// Keyboard, with an element selected: arrows nudge (0.5 mm, Shift = 2 mm; in
+// inches 0.02 in, Shift = 0.1 in) and with Alt resize; Delete or Backspace
+// removes; Escape deselects. Ctrl+A selects all; Ctrl+C, X, V and D copy,
+// cut, paste and duplicate.
 document.addEventListener("keydown", (ev) => {
   if (ev.target.matches("input, textarea, select") || $("#settings").open) return;
-  if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "a") {
-    setPick(new Set(S.layout.elements.map((_, i) => i))); ev.preventDefault(); return;
+  const letter = ev.key.toLowerCase();
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && !ev.shiftKey && letter in SHORTCUTS) {
+    // Text selected on the page (a warning, say) is the browser's to copy
+    if ("cx".includes(letter) && String(getSelection())) return;
+    if (SHORTCUTS[letter]()) ev.preventDefault();
+    return;
   }
   if (!S.pick.size) return;
-  const step = imperial() ? (ev.shiftKey ? 2.54 : 0.508) : (ev.shiftKey ? 2 : 0.5);
+  const step = nudgeStep(ev.shiftKey);
   const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
   if (d) {
-    for (const i of S.pick) { const e = S.layout.elements[i]; e.x = r2(e.x + d[0]); e.y = r2(e.y + d[1]); }
-    drawProps(true); schedule(); ev.preventDefault();
+    if (ev.altKey) geo.resizeBy(pickedEls(), ...d); else geo.nudge(pickedEls(), ...d);
+    drawList(); drawProps(true); schedule(); ev.preventDefault();
   }
   else if (ev.key === "Delete" || ev.key === "Backspace") { removeEls(picked()); ev.preventDefault(); }
   else if (ev.key === "Escape") select(-1);
 });
 
-// Double-click a text, QR or barcode element: jump to its text field
-$("#overlay").addEventListener("dblclick", (ev) => {
-  const box = ev.target.closest(".box");
-  if (!box) return;
-  select(+box.dataset.i);
+// Double-click a text, QR or barcode element, or press Enter on it: jump to
+// its text field
+function editElement(i) {
+  select(i);
   const f = $("#props").querySelector('[data-key="text"], [data-key="data"]');
   if (f) { f.focus(); f.setSelectionRange?.(f.value.length, f.value.length); }
   else $("#props").querySelector('input[type="file"]')?.click();   // an image: choose one
+}
+$("#overlay").addEventListener("dblclick", (ev) => {
+  const box = ev.target.closest(".box");
+  if (box) editElement(+box.dataset.i);
+});
+$("#overlay").addEventListener("keydown", (ev) => {
+  if (ev.key !== "Enter" || !ev.target.matches(".box")) return;
+  editElement(+ev.target.dataset.i);
+  ev.preventDefault();
+});
+// Focus reaches a box only from the keyboard (a click starts a drag instead),
+// and selects it, unless it's already part of a selection
+$("#overlay").addEventListener("focusin", (ev) => {
+  const i = +ev.target.dataset.i;
+  if (ev.target.matches(".box") && !S.pick.has(i)) select(i);
 });
 
 // ---------------------------------------------------------------------------
@@ -1062,6 +598,7 @@ const summary = (e) => e.type === "text" ? e.text.replace(/\n/g, " ⏎ ") : e.ty
 // Selection: S.pick is the set of selected indexes; S.sel is the one shown in
 // the properties panel when exactly one is selected (otherwise -1)
 const picked = () => [...S.pick].sort((a, b) => a - b);
+const pickedEls = () => picked().map((i) => S.layout.elements[i]);
 
 function setPick(set) {
   S.pick = set;
@@ -1071,51 +608,91 @@ function setPick(set) {
 
 // add=true toggles i in the selection; otherwise i becomes the only one (-1 = none)
 function select(i, add = false) {
+  if (i >= 0) listAt = i;   // the list's tab stop follows what was last picked
   const set = add ? new Set(S.pick) : new Set();
   if (i >= 0) add && set.has(i) ? set.delete(i) : set.add(i);
   setPick(set);
 }
 
 function removeEls(idx) {
-  const gone = new Set(idx);
-  S.layout.elements = S.layout.elements.filter((_, i) => !gone.has(i));
+  S.layout.elements = elementOps.removeEls(S.layout.elements, idx);
+  listAt = Math.min(Math.min(...idx), S.layout.elements.length - 1);   // the row that took their place
   setPick(new Set()); schedule();
 }
 
 function moveEl(i, d) {
-  const els = S.layout.elements, j = i + d;
-  if (j < 0 || j >= els.length) return;
-  [els[i], els[j]] = [els[j], els[i]];
+  const j = elementOps.moveEl(S.layout.elements, i, d);
+  if (j < 0) return;
   select(j); schedule();
 }
 
+// The list is one stop for the Tab key: the row at listAt (an element index).
+// Up and Down move between rows, Space or Enter selects one, Shift with an
+// arrow extends the selection, Alt with an arrow reorders, and Delete removes.
+// The four buttons of a selected row follow it in the Tab order.
+let listAt = -1;
+
+const ACTS = [   // [key, title, label, what it does to element i]
+  ["up", "Bring forward (Alt+↑)", "↑", (i) => moveEl(i, 1)],
+  ["down", "Send backward (Alt+↓)", "↓", (i) => moveEl(i, -1)],
+  ["dup", "Duplicate (Ctrl+D)", "⧉", (i) => dupEls([i])],
+  ["del", "Delete (Del)", "×", (i) => removeEls([i])],
+];
+
 function drawList() {
-  const els = S.layout.elements;
+  const els = S.layout.elements, list = $("#elList");
+  // The list is rebuilt on every change, so focus inside it is put back
+  // afterwards, on the same control of whichever row listAt names by then
+  const act = list.contains(document.activeElement) ? document.activeElement.dataset.act ?? "" : null;
+  if (!(listAt >= 0 && listAt < els.length)) listAt = S.sel >= 0 ? S.sel : els.length - 1;
   // Listed top-most first: later elements are drawn on top
   const items = els.map((e, i) => i).reverse().map((i) => {
-    const e = els[i];
-    return h("li", { class: S.pick.has(i) ? "sel" : "", onclick: (ev) => select(i, additive(ev)) },
-      h("span", { class: "swatch" + (e.color === "red" ? " red" : "") }),
-      h("span", { class: "kind" }, KIND[e.type]),
-      h("span", { class: "txt", title: summary(e) }, summary(e)),
-      h("span", { class: "acts" },
-        h("button", { class: "icon", title: "Bring forward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, 1); } }, "↑"),
-        h("button", { class: "icon", title: "Send backward", onclick: (ev) => { ev.stopPropagation(); moveEl(i, -1); } }, "↓"),
-        h("button", { class: "icon", title: "Duplicate", onclick: (ev) => { ev.stopPropagation(); dupEls([i]); } }, "⧉"),
-        h("button", { class: "icon", title: "Delete", onclick: (ev) => { ev.stopPropagation(); removeEls([i]); } }, "×")));
+    const e = els[i], sel = S.pick.has(i);
+    return h("li", { class: sel ? "sel" : "", "data-i": i },
+      h("button", { type: "button", class: "el", "data-act": "", tabindex: i === listAt ? 0 : -1,
+        "aria-pressed": sel, "aria-label": describe(e), onclick: (ev) => select(i, additive(ev)) },
+        h("span", { class: "swatch" + (e.color === "red" ? " red" : "") }),
+        h("span", { class: "kind" }, KIND[e.type]),
+        h("span", { class: "txt", title: summary(e) }, summary(e))),
+      h("span", { class: "acts" }, ...ACTS.map(([key, title, label, run]) =>
+        h("button", { type: "button", class: "icon", "data-act": key, title, "aria-label": title.replace(/ \(.*/, ""),
+          onclick: () => run(i) }, label))));
   });
-  $("#elList").replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
+  list.replaceChildren(...(items.length ? items : [h("li", { class: "empty" }, "No elements — add one or pick a quick layout")]));
+  if (act !== null) focusList(act);
 }
+
+// Put focus in the list: on the row at listAt, or on one of its buttons
+function focusList(act = "") {
+  const list = $("#elList"), li = list.querySelector(`li[data-i="${listAt}"]`);
+  for (const b of list.querySelectorAll(".el")) b.tabIndex = b.parentNode === li ? 0 : -1;
+  li?.querySelector(`[data-act="${act}"]`)?.focus();
+  if (!li?.contains(document.activeElement)) li?.querySelector(".el").focus();   // that button is hidden: the row isn't selected
+}
+
+$("#elList").addEventListener("keydown", (ev) => {
+  const li = ev.target.closest("li[data-i]");
+  if (!li) return;
+  const i = +li.dataset.i, rows = [...li.parentNode.children], at = rows.indexOf(li);
+  const to = { ArrowUp: at - 1, ArrowDown: at + 1, Home: 0, End: rows.length - 1 }[ev.key];
+  if (to !== undefined) {
+    const j = +rows[Math.max(0, Math.min(rows.length - 1, to))].dataset.i;
+    if (ev.altKey) { if (ev.key.startsWith("Arrow") && j !== i) moveEl(i, j - i); }   // redrawn with focus on the moved row
+    else {
+      listAt = j;
+      if (ev.shiftKey) setPick(new Set([...S.pick, i, j])); else focusList();
+    }
+  } else if (ev.key === "Delete" || ev.key === "Backspace") {
+    removeEls(S.pick.has(i) ? picked() : [i]);   // the selection, or just this row if it isn't part of it
+  } else return;
+  // Not for the keys on the label, which would nudge or remove the selection
+  ev.preventDefault(); ev.stopPropagation();
+});
 
 // Each copy is stacked just above its original, 2 mm right and down; the copies end up selected
 function dupEls(idx) {
-  const els = S.layout.elements, copies = new Set();
-  idx.slice().sort((a, b) => b - a).forEach((i) => {
-    const c = structuredClone(els[i]);
-    c.x = r2(c.x + 2); c.y = r2(c.y + 2);
-    els.splice(i + 1, 0, c);
-  });
-  idx.slice().sort((a, b) => a - b).forEach((i, n) => copies.add(i + n + 1));
+  const copies = elementOps.duplicateEls(S.layout.elements, idx);
+  listAt = Math.max(...copies);
   setPick(copies); schedule();
 }
 
@@ -1151,7 +728,7 @@ const seg = (key, opts) => {
   const wrap = h("div", { class: "seg" });
   const draw = () => wrap.replaceChildren(...opts.map(([v, txt, extra = {}]) =>
     h("button", { type: "button", class: (e[key] === v ? "on " : "") + (extra.cls || ""), disabled: extra.disabled,
-      title: extra.title, onclick: () => { e[key] = v; draw(); drawList(); schedule(); } }, txt)));
+      "aria-pressed": e[key] === v, title: extra.title, onclick: () => { e[key] = v; draw(); drawList(); schedule(); } }, txt)));
   draw();
   return wrap;
 };
@@ -1180,11 +757,13 @@ function drawMultiProps(box) {
   const idx = picked(), els = idx.map((i) => S.layout.elements[i]);
   const to = h("div", { class: "seg" });
   const drawTo = () => to.replaceChildren(...[["selection", "Selection"], ["label", "Label"]].map(([v, t]) =>
-    h("button", { type: "button", class: S.alignTo === v ? "on" : "", onclick: () => { S.alignTo = v; drawTo(); } }, t)));
+    h("button", { type: "button", class: S.alignTo === v ? "on" : "", "aria-pressed": S.alignTo === v,
+      onclick: () => { S.alignTo = v; drawTo(); } }, t)));
   drawTo();
   const colour = h("div", { class: "seg" });
   const drawColour = () => colour.replaceChildren(...colourOpts(tape().red).map(([v, t, x = {}]) =>
     h("button", { type: "button", class: (els.every((e) => e.color === v) ? "on " : "") + (x.cls || ""), disabled: x.disabled, title: x.title,
+      "aria-pressed": els.every((e) => e.color === v),
       onclick: () => { els.forEach((e) => { e.color = v; }); drawColour(); drawList(); schedule(); } }, t)));
   drawColour();
   const n3 = idx.length >= 3 ? {} : { disabled: true, title: "Select three or more" };
@@ -1223,7 +802,7 @@ function drawProps(light = false) {
   } else if (e.type === "qr") {
     kids.push(fld("Data", editing(bind("data", h("input", { type: "text", spellcheck: false })))));
   } else if (e.type === "barcode") {
-    const hint = h("div", { class: "sub", style: "margin:-6px 0 10px" }, barcodeKind(e).hint);
+    const hint = h("div", { class: "sub under" }, barcodeKind(e).hint);
     const type = h("select", {}, ...S.meta.barcodes.map((k) => h("option", { value: k.id }, k.name)));
     type.value = barcodeKind(e).id;
     type.addEventListener("change", () => { e.symbology = type.value; hint.textContent = barcodeKind(e).hint; drawList(); schedule(); });
@@ -1250,11 +829,11 @@ function drawProps(light = false) {
       (v) => Math.min(3, Math.max(0.5, +v || 1)));
     kids.push(h("div", { class: "row2" }, fld("Font", bind("font", font)), fld("Size (pt)", size)));
     kids.push(h("div", { class: "row2" }, fld("Max size (pt)", max), fld("Line spacing", spacing)));
-    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Size 0 = shrink to fit the box, up to Max size"));
+    kids.push(h("div", { class: "sub under" }, "Size 0 = shrink to fit the box, up to Max size"));
     kids.push(h("div", { class: "field" }, "Align", seg("align", [["left", "Left"], ["center", "Centre"], ["right", "Right"]])));
     kids.push(h("div", { class: "field" }, "Vertical", seg("valign", [["top", "Top"], ["middle", "Middle"], ["bottom", "Bottom"]])));
     kids.push(h("div", { class: "checks" }, chk("bold", "Bold"), chk("wrap", "Wrap"), chk("invert", "Inverted")));
-    kids.push(h("div", { class: "row2" }, fld(`Padding (${units})`, num("padding_mm", { min: 0 }))));
+    kids.push(h("div", { class: "row2" }, fld(`Padding (${units()})`, num("padding_mm", { min: 0 }))));
   } else if (e.type === "qr") {
     const ec = h("select", {}, ...[["L", "L — 7%"], ["M", "M — 15%"], ["Q", "Q — 25%"], ["H", "H — 30%"]].map(([v, t]) => h("option", { value: v }, t)));
     kids.push(fld("Error correction", bind("ec", ec)));
@@ -1271,11 +850,11 @@ function drawProps(light = false) {
     showLevel();
     kids.push(h("div", { class: "field" }, "Black and white", mode));
     kids.push(h("label", { class: "field" }, h("span", { class: "range-label" }, "Threshold", shown), level));
-    kids.push(h("div", { class: "sub", style: "margin:-6px 0 10px" }, "Threshold suits logos and line art; dither suits shading and photos."));
+    kids.push(h("div", { class: "sub under" }, "Threshold suits logos and line art; dither suits shading and photos."));
     kids.push(h("div", { class: "checks" }, chk("invert", "Inverted")));
   } else if (e.type === "rect") {
     kids.push(h("div", { class: "checks" }, chk("fill", "Filled")));
-    kids.push(h("div", { class: "row2" }, fld(`Outline (${units})`, num("stroke_mm", { min: 0.1, step: 0.1 }))));
+    kids.push(h("div", { class: "row2" }, fld(`Outline (${units()})`, num("stroke_mm", { min: 0.1, step: 0.1 }))));
   }
   box.replaceChildren(...kids);
 }
@@ -1333,9 +912,8 @@ function imagePicker(e) {
 // An image file as a data URL that fits the server's budget (S.meta.image_budget,
 // counted as stored in a template). PNG at up to IMAGE_MAX px on the long side
 // first, which keeps logos lossless; then WebP, which suits photos; then the
-// same at smaller sizes, down to IMAGE_MIN. SVGs are drawn here, scaled up to
-// IMAGE_MAX, since the server can't read them.
-const IMAGE_MAX = 600, IMAGE_MIN = 128;
+// same at smaller sizes, down to IMAGE_MIN (images.mjs lists the sizes). SVGs
+// are drawn here, scaled up to IMAGE_MAX, since the server can't read them.
 async function readImage(file) {
   const url = URL.createObjectURL(file);
   try {
@@ -1345,13 +923,9 @@ async function readImage(file) {
     const svg = file.type === "image/svg+xml";
     const w0 = img.naturalWidth || IMAGE_MAX, h0 = img.naturalHeight || IMAGE_MAX;   // an SVG may have no size
     const budget = S.meta.image_budget;
-    // An image never grows, so one smaller than IMAGE_MIN is tried at its own
-    // size. The loop used to stop before its first pass for such an image,
-    // and a 40 px icon was refused as too large.
-    const start = svg ? IMAGE_MAX : Math.min(IMAGE_MAX, Math.max(w0, h0)), least = Math.min(IMAGE_MIN, start);
-    for (let side = start; side >= least; side = Math.floor(side * 0.8)) {
-      const k = side / Math.max(w0, h0);
-      const cv = h("canvas", { width: Math.max(1, Math.round(w0 * k)), height: Math.max(1, Math.round(h0 * k)) });
+    const { sides, least } = sidesToTry(w0, h0, svg);
+    for (const side of sides) {
+      const cv = h("canvas", sizeAt(w0, h0, side));
       cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
       const png = cv.toDataURL("image/png");
       if (png.length <= budget) return png;
@@ -1363,7 +937,7 @@ async function readImage(file) {
 }
 
 document.querySelectorAll("[data-add]").forEach((b) => b.addEventListener("click", () => {
-  S.layout.elements.push(newElement(b.dataset.add));
+  S.layout.elements.push(newElement(b.dataset.add, canvasMM()));
   select(S.layout.elements.length - 1);
   schedule();
 }));
@@ -1379,13 +953,14 @@ function drawTapes() {
 function drawSetup() {
   const t = tape(), len = $("#length"), [min, max] = S.meta.limits.length_mm;
   $("#tape").value = t.id;
-  $("#lengthUnit").textContent = units;
+  $("#lengthUnit").textContent = units();
   Object.assign(len, { step: imperial() ? 0.1 : 1, min: toUnit(min), max: toUnit(max) });
   len.value = toUnit(S.layout.length_mm);
   $("#lengthRow").querySelector("label").hidden = !t.endless;
   $("#printable").textContent = t.endless ? `${fmt(t.printable_mm[0])} wide` : fmt2(...t.printable_mm);
-  $("#orientation").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === S.layout.orientation));
-  $("#units").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.v === units));
+  const press = (b, on) => { b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); };
+  $("#orientation").querySelectorAll("button").forEach((b) => press(b, b.dataset.v === S.layout.orientation));
+  $("#units").querySelectorAll("button").forEach((b) => press(b, b.dataset.v === units()));
 }
 
 // Redraw every panel and the label, after the layout is replaced, reshaped or
@@ -1400,17 +975,7 @@ function reshape(change) {
   const a = canvasMM();
   change();
   const b = canvasMM();
-  const kx = b.w / a.w, ky = b.h / a.h;
-  if (Math.abs(kx - 1) > 1e-6 || Math.abs(ky - 1) > 1e-6) {
-    for (const e of S.layout.elements) {
-      e.x = r2(e.x * kx); e.w = r2(e.w * kx);
-      e.y = r2(e.y * ky); e.h = r2(e.h * ky);
-      if (e.type === "qr") {
-        const s = Math.min(e.w, e.h);
-        e.x = r2(e.x + (e.w - s) / 2); e.y = r2(e.y + (e.h - s) / 2); e.w = e.h = s;
-      }
-    }
-  }
+  geo.rescale(S.layout.elements, b.w / a.w, b.h / a.h);
   drawAll(); schedule();
 }
 
@@ -1423,8 +988,8 @@ $("#length").addEventListener("change", (ev) => reshape(() => {
 // Units change only what's shown, so there's no undo step
 $("#units").addEventListener("click", (ev) => {
   const v = ev.target.dataset.v;
-  if (!v || v === units) return;
-  units = v;
+  if (!v || v === units()) return;
+  setUnits(v);
   try { localStorage.setItem(UNITS, v); } catch {}
   drawTapes(); drawAll();
 });
@@ -1481,7 +1046,7 @@ async function drawTemplates() {
   const { templates, samples = [] } = await api("/api/templates");
   const own = templates.map((n) => h("li", { class: "own" },
     h("button", { class: "name", onclick: () => loadTemplate(n) }, n),
-    h("button", { class: "icon", title: "Delete template", onclick: async () => {
+    h("button", { class: "icon", title: "Delete template", "aria-label": `Delete template ${n}`, onclick: async () => {
       if (!confirm(`Delete template “${n}”?`)) return;
       try {
         await api(`/api/templates/${encodeURIComponent(n)}`, { method: "DELETE" });
@@ -1503,7 +1068,7 @@ async function loadTemplate(n, sample = false) {
   try {
     j = await api(`/api/${sample ? "samples" : "templates"}/${encodeURIComponent(n)}`);
   } catch (e) { status(e.message, "err", "#tplStatus"); return; }
-  const layout = tidyLayout(j.layout);
+  const layout = elementOps.tidyLayout(j.layout, S.meta.limits.length_mm);
   if (!layout) { status(`“${n}” has no layout, so it can't be opened`, "err", "#tplStatus"); return; }
   status("", "", "#tplStatus");
   S.layout = layout; S.fixed = lowerKeys(j.fixed);
@@ -1543,13 +1108,13 @@ function drawData() {
   const ph = fields();
   const rows = ph.map((p) => {
     const fixedIn = h("input", { type: "text", placeholder: "text or {{field}}", value: S.fixed[fkey(p)] ?? "",
-      title: "Fixed text. May include other fields, such as {{item}}" });
+      "aria-label": `Fixed text for ${p}`, title: "Fixed text. May include other fields, such as {{item}}" });
     fixedIn.addEventListener("input", () => { S.fixed[fkey(p)] = fixedIn.value; schedule(); });
     // A newly referenced field gets its own row once typing is done
     fixedIn.addEventListener("change", () => { if (fields().join("\u0000") !== ph.join("\u0000")) { autoMap(); drawData(); } });
     let src = null;
     if (S.data) {
-      src = h("select", {}, h("option", { value: "" }, "— fixed text —"),
+      src = h("select", { "aria-label": `Column for ${p}` }, h("option", { value: "" }, "— fixed text —"),
         ...S.data.headers.map((c) => h("option", { value: c }, c)));
       src.value = S.mapping[fkey(p)] ?? "";
       fixedIn.hidden = !!src.value;
@@ -1572,12 +1137,16 @@ function drawData() {
 }
 
 // The rows table is built only when data is loaded: rebuilding it takes about
-// a second per 5,000 rows. Clicks and ticks update it in place.
+// a second per 5,000 rows. Clicks and ticks update it in place. For the Tab
+// key the table is one stop, the row being previewed: Up and Down (and Home,
+// End, Page Up and Page Down) preview another row, and Space ticks it. The
+// rows' own tick boxes are left out of the Tab order, or there'd be one stop
+// for every row.
 
 function drawRows() {
   if (!S.data) { $("#rows").replaceChildren(); return; }
   const { headers, rows } = S.data;
-  const all = h("input", { type: "checkbox", title: "Select all", class: "all" });
+  const all = h("input", { type: "checkbox", title: "Select all", "aria-label": "Print every row", class: "all" });
   all.addEventListener("change", () => {
     S.picked = all.checked ? new Set(rows.map((_, i) => i)) : new Set();
     for (const cb of $("#rows tbody").querySelectorAll("input")) cb.checked = all.checked;
@@ -1585,11 +1154,12 @@ function drawRows() {
   });
   const thead = h("thead", {}, h("tr", {}, h("th", {}, all), h("th", {}, "#"), ...headers.map((c) => h("th", {}, c))));
   const tbody = h("tbody", {}, ...rows.map((r, i) => {
-    const cb = h("input", { type: "checkbox" });
+    const cb = h("input", { type: "checkbox", tabindex: -1, "aria-label": `Print row ${i + 1}` });
     cb.checked = S.picked.has(i);
     cb.addEventListener("click", (ev) => ev.stopPropagation());   // ticking doesn't preview the row
     cb.addEventListener("change", () => { cb.checked ? S.picked.add(i) : S.picked.delete(i); drawPicked(); });
-    return h("tr", { class: i === S.cur ? "cur" : "", onclick: () => showRow(i) },
+    return h("tr", { class: i === S.cur ? "cur" : "", tabindex: i === S.cur ? 0 : null,
+      "aria-current": i === S.cur ? "true" : null, onclick: () => showRow(i) },
       h("td", {}, cb), h("td", { class: "n" }, i + 1), ...headers.map((c) => h("td", { title: r[c] }, r[c])));
   }));
   $("#rows").replaceChildren(thead, tbody);
@@ -1597,12 +1167,31 @@ function drawRows() {
 }
 
 function showRow(i) {
-  const body = $("#rows tbody");
-  body.children[S.cur]?.classList.remove("cur");
-  body.children[i].classList.add("cur");
+  const body = $("#rows tbody"), was = body.children[S.cur], now = body.children[i];
+  if (was) { was.classList.remove("cur"); was.removeAttribute("tabindex"); was.removeAttribute("aria-current"); }
+  now.classList.add("cur");
+  now.tabIndex = 0;
+  now.setAttribute("aria-current", "true");
   S.cur = i;
   schedule();
 }
+
+$("#rows").addEventListener("keydown", (ev) => {
+  const tr = ev.target.closest("tbody tr");
+  if (!tr || ev.target.matches("input") || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const n = S.data.rows.length;
+  const to = { ArrowUp: S.cur - 1, ArrowDown: S.cur + 1, PageUp: S.cur - 10, PageDown: S.cur + 10, Home: 0, End: n - 1 }[ev.key];
+  if (to !== undefined) {
+    showRow(Math.max(0, Math.min(n - 1, to)));
+    const now = tr.parentNode.children[S.cur];
+    now.focus();
+    now.scrollIntoView({ block: "nearest" });
+  } else if (ev.key === " ") {
+    tr.querySelector("input").click();   // ticks or unticks the row
+  } else return;
+  // Not for the keys on the label, which would nudge the selected elements
+  ev.preventDefault(); ev.stopPropagation();
+});
 
 // The selection count, the Select all box, and the print button
 function drawPicked() {
@@ -1639,16 +1228,11 @@ $("#dataClear").addEventListener("click", () => {
 // Printing
 // ---------------------------------------------------------------------------
 
-// Printing more labels than this asks first. Loading a data file ticks every
-// row, so one click could otherwise send the whole file to the printer.
-const CONFIRM_ABOVE = 25;
-
-// The ticked data rows, in order, or null without data (one label from fixed values)
-const jobRows = () => S.data ? [...S.picked].sort((a, b) => a - b) : null;
-
-// Copies as the server will take them: a whole number from 1 to its limit
-const copies = () => Math.max(1, Math.min(S.meta.limits.copies, Math.floor(+$("#copies").value || 1)));
-const labelCount = () => (S.data ? S.picked.size : 1) * copies();
+// What a click on Print will send (job.mjs): the ticked data rows, the copies
+// as the server will take them, and the number of labels that makes
+const jobRows = () => job.jobRows(S.data, S.picked);
+const copies = () => job.copiesOf($("#copies").value, S.meta.limits.copies);
+const labelCount = () => job.labelCount(S.data, S.picked, copies());
 
 function drawPrintButton() {
   const n = labelCount(), b = $("#printBtn");
@@ -1671,7 +1255,7 @@ function status(msg, cls = "", where = "#printStatus") {
 $("#printBtn").addEventListener("click", async () => {
   if (!S.meta.config.printer_host) { openSettings(); return; }
   const n = labelCount();
-  if (n > CONFIRM_ABOVE && !confirm(`Print ${n} labels?`)) return;
+  if (n > job.CONFIRM_ABOVE && !confirm(`Print ${n} labels?`)) return;   // loading data ticks every row
   const b = $("#printBtn");
   b.disabled = true;
   status("Sending…");
@@ -1699,6 +1283,9 @@ function drawPrinterChip(ok) {
   const c = S.meta.config;
   $("#printerLabel").textContent = c.printer_host ? `${c.model} · ${c.printer_host}` : "No printer set";
   $("#printerDot").className = "dot" + (ok === true ? " ok" : ok === false ? " bad" : "");
+  // The dot's colour, in words
+  $("#printerChip").setAttribute("aria-label", "Printer settings. " + $("#printerLabel").textContent
+    + (ok === true ? ", connected" : ok === false ? ", not answering" : ""));
 }
 
 function openSettings() {
@@ -1742,6 +1329,11 @@ $("#cfgTest").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 // Boot
 // ---------------------------------------------------------------------------
+
+// Module code isn't reachable from the browser's console, so the few things
+// worth reaching are put here: the state, to look at, and the printer chip,
+// which the README's screenshots set to "connected" (docs/development.md)
+window.ohBrother = { state: S, drawPrinterChip };
 
 (async function boot() {
   // Held open while this page is: the launcher stops the app once the last

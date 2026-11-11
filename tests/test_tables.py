@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 import zipfile
+from unittest import mock
 
 import tables
 
@@ -181,6 +182,53 @@ class Excel(unittest.TestCase):
     def test_1904_dates(self):
         sheet = f'<worksheet {X_NS}><sheetData><row r="1"><c r="A1" s="1"><v>1</v></c></row></sheetData></worksheet>'
         self.assertEqual(tables.read_table("data.xlsx", xlsx(sheet, date1904=True)), [["1904-01-02"]])
+
+
+class TooManyCells(unittest.TestCase):
+    """Small files that ask for huge tables: the empty cells before a cell far
+    to the right are filled in, and every row is given every column."""
+
+    def assertTooMany(self, name, raw):
+        with self.assertRaises(tables.TableError) as caught:
+            tables.read_table(name, raw)
+        self.assertEqual(str(caught.exception), tables.TOO_MANY_CELLS)
+
+    def sheet(self, rows):
+        return xlsx(f"<worksheet {X_NS}><sheetData>{rows}</sheetData></worksheet>")
+
+    def test_an_excel_cell_named_far_to_the_right(self):
+        # Column ZZZZZ is the 12 millionth; Excel's own last column is XFD
+        self.assertTooMany("far.xlsx", self.sheet('<row r="1"><c r="ZZZZZ1"><v>1</v></c></row>'))
+
+    def test_excel_rows_that_each_reach_the_last_column(self):
+        rows = "".join(f'<row r="{i}"><c r="XFD{i}"><v>1</v></c></row>' for i in range(1, 101))
+        self.assertTooMany("wide.xlsx", self.sheet(rows))   # 100 x 16,384 cells
+
+    def test_opendocument_rows_that_each_reach_the_last_column(self):
+        row = ('<table:table-row><table:table-cell table:number-columns-repeated="16383"/>'
+               "<table:table-cell><text:p>x</text:p></table:table-cell></table:table-row>")
+        raw = (f'<?xml version="1.0"?><office:document {ODS_NS}><office:body><office:spreadsheet>'
+               f"<table:table>{row * 100}</table:table></office:spreadsheet></office:body></office:document>")
+        self.assertTooMany("wide.fods", raw.encode())
+
+    def test_one_long_row_among_many(self):
+        # Every row gets every column, so 2,000 columns by 600 rows counts in full
+        self.assertTooMany("wide.csv", (",".join(["h"] * 2000) + "\n" + "1\n" * 600).encode())
+
+    def test_json_objects_that_each_add_a_column(self):
+        self.assertTooMany("keys.json", json.dumps([{f"k{i}": 1} for i in range(1001)]).encode())
+
+    def test_a_large_table_is_read(self):
+        raw = "\n".join(",".join(["cell"] * 100) for _ in range(5000)).encode()   # half the limit
+        self.assertEqual(len(tables.read_table("big.csv", raw)), 5000)
+
+    def test_the_limit_itself_is_allowed(self):
+        with mock.patch.object(tables, "MAX_CELLS", 6):
+            self.assertEqual(len(tables.read_table("a.csv", b"a,b,c\n1,2,3\n")), 2)
+            with self.assertRaises(tables.TableError):
+                tables.read_table("a.csv", b"a,b,c\n1,2,3\n4\n")
+            self.assertEqual(len(tables.read_table("a.xlsx", self.sheet(
+                '<row r="1"><c r="C1"><v>1</v></c></row><row r="2"><c r="C2"><v>1</v></c></row>'))), 2)
 
 
 class Refused(unittest.TestCase):

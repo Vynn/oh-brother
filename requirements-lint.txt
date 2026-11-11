@@ -1,0 +1,4 @@
+# What the Lint job in .github/workflows/tests.yml runs over the Python code.
+# Not part of the app, and never installed into it.
+pyflakes==4.1.0 \
+    --hash=sha256:b2e05e6bac8e49b67be2a6ffa63422c60f7193fc72e8180255907b41ec997dc1

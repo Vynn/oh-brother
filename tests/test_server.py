@@ -4,6 +4,7 @@ printing is a dry run, and the printer address is never used."""
 import io
 import json
 import os
+import re
 import tempfile
 import unittest
 from unittest import mock
@@ -24,6 +25,15 @@ SAMPLE = {"layout": {"tape": "62red", "elements": [TITLE]}, "fixed": {"title": "
 
 def layout(*elements):
     return {"tape": "62red", "length_mm": 30, "orientation": "portrait", "elements": list(elements)}
+
+
+# What a module imports: import … from "./x.mjs", import "./x.mjs" or import("./x.mjs")
+IMPORT = re.compile(r"""(?:\bfrom|\bimport)\s*\(?\s*["']([^"']+\.mjs)["']""")
+
+
+def editor_modules():
+    """The editor's script files, by name."""
+    return sorted(n for n in os.listdir(server.STATIC) if n.endswith(".mjs"))
 
 
 def header(resp, name):
@@ -447,6 +457,60 @@ class OtherSites(ApiTest):
         self.assertEqual(client.post("/api/config", data="{}", content_type="text/plain").status_code, 415)
 
 
+    def test_api_requests_from_other_sites_are_refused(self):
+        # A browser says what kind of page a request comes from. "same-site"
+        # is another program's page on this machine, at another port.
+        for site in ("cross-site", "same-site"):
+            with self.subTest(site):
+                resp = self.client.get("/api/meta", headers={"Sec-Fetch-Site": site})
+                self.assertEqual(resp.status_code, 403)
+                self.assertEqual(resp.get_json(), {"error": "Requests from other sites aren't accepted"})
+        # The data upload is a form, which any page may send without asking
+        resp = self.client.post("/api/data", data={"file": (io.BytesIO(b"a,b\n1,2\n"), "x.csv")},
+                                content_type="multipart/form-data", headers={"Sec-Fetch-Site": "cross-site"})
+        self.assertEqual(resp.status_code, 403)
+
+    def test_the_editor_and_other_programs_are_let_in(self):
+        # The editor's own page, the address bar, and anything that isn't a
+        # browser and so doesn't say
+        for site in ("same-origin", "none", None):
+            with self.subTest(site):
+                headers = {"Sec-Fetch-Site": site} if site else {}
+                self.assertEqual(self.client.get("/api/meta", headers=headers).status_code, 200)
+        # A link on another site still opens the editor
+        with self.client.get("/", headers={"Sec-Fetch-Site": "cross-site"}) as resp:
+            self.assertEqual(resp.status_code, 200)
+
+
+class PagePolicy(ApiTest):
+
+    def test_every_response_carries_the_headers(self):
+        for method, path in (("get", "/"), ("get", "/static/app.mjs"), ("get", "/api/meta"),
+                             ("get", "/api/nothing"), ("get", "/nothing"), ("post", "/api/render")):
+            with self.subTest(path), getattr(self.client, method)(path, json={"layout": layout(TITLE)}) as resp:
+                self.assertEqual(resp.headers["Content-Security-Policy"], server.PAGE_POLICY)
+                self.assertEqual(resp.headers["X-Content-Type-Options"], "nosniff")
+
+    def test_static_files_say_what_they_are(self):
+        # With nosniff a browser goes by the type alone, and runs or applies nothing else
+        for path, kind in (("/", "text/html"), ("/static/app.mjs", "javascript"), ("/static/units.mjs", "javascript"),
+                           ("/static/style.css", "text/css")):
+            with self.subTest(path), self.client.get(path) as resp:
+                self.assertIn(kind, resp.content_type)
+
+    def test_the_page_keeps_to_its_policy(self):
+        # The policy allows scripts and styles from the app's own files only,
+        # so the page has none written into it, and the editor adds none
+        self.assertIn("script-src 'self';", server.PAGE_POLICY)
+        self.assertIn("style-src 'self';", server.PAGE_POLICY)
+        with open(os.path.join(server.STATIC, "index.html"), encoding="utf-8") as f:
+            page = f.read()
+        self.assertNotRegex(page, r"<style|\sstyle=|<script(?![^>]*\ssrc=)|\son[a-z]+=|javascript:")
+        for name in editor_modules():
+            with self.subTest(name), open(os.path.join(server.STATIC, name), encoding="utf-8") as f:
+                self.assertNotRegex(f.read(), r"""\bstyle:\s*["'`]|setAttribute\(\s*["']style|\beval\(|new Function""")
+
+
 class Errors(ApiTest):
 
     def assertJsonError(self, resp, status, message=None):
@@ -507,10 +571,46 @@ class Pages(ApiTest):
     def test_editor_and_its_files(self):
         with self.client.get("/") as page:   # files are sent open: close them
             self.assertEqual((page.status_code, page.mimetype), (200, "text/html"))
-            self.assertIn(b'src="/static/app.js"', page.data)
-        for path in ("/static/app.js", "/static/style.css"):
+            self.assertIn(b'<script type="module" src="/static/app.mjs">', page.data)
+        for path in ("/static/style.css", *("/static/" + name for name in editor_modules())):
             with self.subTest(path), self.client.get(path) as resp:
                 self.assertEqual(resp.status_code, 200)
+
+    def test_cancel_closes_the_printer_dialog_whatever_it_holds(self):
+        # Without formnovalidate the browser checks the form first, and a port
+        # out of range kept the dialog open
+        with self.client.get("/") as page:
+            self.assertIn(b'<button value="cancel" formnovalidate>Cancel</button>', page.data)
+
+    def test_every_module_the_editor_imports_is_there(self):
+        # A module renamed or left out stops the whole page, and only in a browser
+        self.assertIn("app.mjs", editor_modules())
+        for folder in (server.STATIC, server.EDITOR_TESTS):
+            for name in sorted(n for n in os.listdir(folder) if n.endswith(".mjs")):
+                with self.subTest(name), open(os.path.join(folder, name), encoding="utf-8") as f:
+                    for target in IMPORT.findall(f.read()):
+                        self.assertTrue(os.path.isfile(os.path.join(folder, target)), target)
+
+    def test_the_editors_tests_are_served_only_when_asked_for(self):
+        for path in ("/tests/editor/", "/tests/editor/all.mjs", "/app/static/units.mjs"):
+            with self.subTest(path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+        client = server.create_app(self.data, editor_tests=True).test_client()
+        for path, kind in (("/tests/editor/", "text/html"), ("/tests/editor/all.mjs", "javascript"),
+                           ("/tests/editor/page.css", "text/css"), ("/app/static/units.mjs", "javascript")):
+            with self.subTest(path), client.get(path) as resp:
+                self.assertEqual(resp.status_code, 200)
+                self.assertIn(kind, resp.content_type)
+        self.assertEqual(client.get("/tests/editor/../test_server.py").status_code, 404)
+
+    def test_the_editors_tests_cover_every_test_file_and_use_the_servers_pattern(self):
+        with open(os.path.join(server.EDITOR_TESTS, "all.mjs"), encoding="utf-8") as f:
+            listed = sorted(IMPORT.findall(f.read()))
+        on_disk = sorted("./" + n for n in os.listdir(server.EDITOR_TESTS) if n.endswith(".test.mjs"))
+        self.assertEqual([n for n in listed if n.endswith(".test.mjs")], on_disk)
+        # The editor is sent the server's field pattern; its tests hold a copy
+        with open(os.path.join(server.EDITOR_TESTS, "fields.test.mjs"), encoding="utf-8") as f:
+            self.assertIn("const PATTERN = " + json.dumps(fields.PLACEHOLDER.pattern) + ";", f.read())
 
     def test_nothing_outside_the_static_folder(self):
         for path in ("/static/../server.py", "/static/%2e%2e/server.py", "/static/missing.js"):

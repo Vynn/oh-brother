@@ -24,12 +24,32 @@ import tapes
 STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 # Sample templates and data, shipped with the app and read-only. The data
 # folder holds only the user's own templates and settings.
-SAMPLES = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "samples")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SAMPLES = os.path.join(ROOT, "samples")
+# The editor's own tests, served only when asked for (--tests); see create_app()
+EDITOR_TESTS = os.path.join(ROOT, "tests", "editor")
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}   # names this machine is reached by without --lan
 MAX_COPIES = 100   # of each label in one job; the editor is sent this (/api/meta)
+
+# What the editor's page may load and do, sent with every response as its
+# Content-Security-Policy. The page uses its own script and stylesheet and
+# nothing from elsewhere. Previews are blob: addresses; saved images are data:
+# addresses, which the editor also reads back with fetch(), hence connect-src.
+# frame-ancestors stops another site showing the editor inside its own page,
+# where a click meant for that page could land on Print.
+PAGE_POLICY = "; ".join((
+    "default-src 'none'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "img-src 'self' blob: data:",
+    "connect-src 'self' data:",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+))
 
 # Template names become file names, so they follow the rules of Windows, macOS
 # and Linux together. Names that break them are refused, not changed.
@@ -222,8 +242,9 @@ def is_local_host(host):
         return False
 
 
-def create_app(data_dir, lan=False, samples_dir=SAMPLES):
-    """The app. `lan`: other machines may connect, by any name for this one."""
+def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
+    """The app. `lan`: other machines may connect, by any name for this one.
+    `editor_tests`: also serve the editor's tests, as a page to open."""
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
     tpl_dir = os.path.join(data_dir, "templates")
@@ -312,6 +333,17 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         # With --lan, other machines use whatever name they know it by.
         if not lan and not is_local_host(request.host):
             abort(403, "Unknown host name; open the app at 127.0.0.1 or localhost")
+        # Browsers say where a request comes from, in Sec-Fetch-Site: the
+        # editor's own page ("same-origin"), the address bar or a bookmark
+        # ("none"), or a page on another site. Only the first two have any
+        # reason to call the API. The page itself stays open to links from
+        # anywhere. Browsers send this only to addresses they count as secure,
+        # which 127.0.0.1 and localhost are and a plain http address on the
+        # network is not, so with --lan it's mostly absent, as it is from other
+        # programs; then the checks around this one are what applies.
+        if request.path.startswith("/api/") \
+                and request.headers.get("Sec-Fetch-Site", "none") not in ("same-origin", "none"):
+            abort(403, "Requests from other sites aren't accepted")
         # Pages on other sites can send forms and plain text here without
         # asking, but JSON only after a CORS check this server never answers.
         # So anything with a body must be JSON. The data upload is a form, but
@@ -319,6 +351,14 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
         if request.method in ("POST", "PUT", "PATCH") and request.endpoint != "read_data" \
                 and not request.is_json:
             abort(415, "Requests must be sent as JSON")
+
+    @app.after_request
+    def protect(resp):
+        resp.headers.setdefault("Content-Security-Policy", PAGE_POLICY)
+        # A response is only ever what its Content-Type says: an uploaded
+        # image or a template's text is never run as a script or shown as a page
+        resp.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return resp
 
     # ---- errors: the API answers in JSON, which the editor shows -----------
 
@@ -344,6 +384,24 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES):
     @app.get("/static/<path:p>")
     def static_files(p):
         return send_from_directory(STATIC, p)
+
+    # ---- the editor's tests, with --tests -----------------------------------
+    # The test files import the editor's modules by the path between the two
+    # folders ("../../app/static/units.mjs"), as Node needs in CI. So here
+    # both folders are served where they sit in the repository, and the same
+    # files run in a browser at /tests/editor/.
+    if editor_tests:
+        @app.get("/tests/editor/")
+        def editor_tests_page():
+            return send_from_directory(EDITOR_TESTS, "index.html")
+
+        @app.get("/tests/editor/<path:p>")
+        def editor_tests_files(p):
+            return send_from_directory(EDITOR_TESTS, p)
+
+        @app.get("/app/static/<path:p>")
+        def editor_modules(p):
+            return send_from_directory(STATIC, p)
 
     # ---- presence: lets the launcher stop once the last page closes --------
 

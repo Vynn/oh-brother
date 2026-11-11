@@ -1,13 +1,16 @@
 # Development
 
-The app is plain Python with a plain HTML, CSS and JavaScript front end. There's no front-end build step. `build.sh` only fetches the Python runtime and packages.
+The app is plain Python with a plain HTML, CSS and JavaScript front end. The JavaScript is a handful of modules that the browser loads as they are: there's no front-end build step, and nothing from npm. `build.sh` only fetches the Python runtime and packages.
 
 ## Layout
 
 | Path | Contents | In the repo? |
 |---|---|---|
 | `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
+| `requirements*.txt` | The packages and their checksums: the app's, the build tool's and CI's | Yes |
+| `app/static/` | The editor: `index.html`, `style.css`, and its code in `.mjs` modules | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
+| `tests/editor/` | The editor's own tests, and the page and the Node script that run them | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
@@ -25,7 +28,26 @@ sh build.sh
 sh run.sh
 ```
 
-`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app. To move to newer versions, change the pins, rebuild and run the tests.
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app.
+
+Everything the build downloads is checked against a SHA-256 kept in the repository, and a download that doesn't match stops the build:
+
+- **The runtime.** `build.sh` holds the checksum of each platform's archive, taken from the `SHA256SUMS` file of the python-build-standalone release. The archive is downloaded whole and checked before any of it is unpacked.
+- **The packages.** Each line of the requirements files carries the checksum of the file PyPI serves for it, and pip runs with `--require-hashes`, which also refuses a package that has none. Pillow and MarkupSafe are compiled, so they have one checksum for each platform.
+- **The build tool.** packbits comes as source only, so pip builds it, and fetches setuptools to do that. `requirements-build.txt` pins and checks that as well (pip's `--build-constraint`).
+
+Each folder is built beside the one it replaces (`vendor/common.new`) and swapped in once it's complete. A build that fails, or runs without a network, leaves the last working build in place.
+
+### Changing a package
+
+1. Change its version in the requirements file and delete its `--hash` lines.
+2. Run `sh build.sh linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64`. pip stops and prints the line it wants, with the checksum of the file it downloaded. For Pillow it stops once for each platform; for MarkupSafe it prints only this machine's file, and the other three are on its PyPI page.
+3. Compare each checksum with the SHA-256 that PyPI lists for that file on the package's *Download files* page, then add it.
+4. Rebuild, run the tests, and update the table under [Third-party code](#third-party-code).
+
+For a new runtime, change `PBS_TAG` and `PY_VER` in `build.sh` and copy the four checksums from the release's `SHA256SUMS` file.
+
+`sh build.sh --newest` installs the newest version of every package instead, with no checksums, as the monthly check does. It replaces the pinned build in `vendor/`, so run `sh build.sh` again afterwards.
 
 `.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
 
@@ -39,12 +61,12 @@ The tests use Python's built-in `unittest`, so they run on the bundled runtime w
 
 They cover the server side, against a temporary data folder:
 
-- **Fields and data files:** filling and tidying fields, and reading every data format. Spreadsheets are built in memory.
+- **Fields and data files:** filling and tidying fields, and reading every data format. Spreadsheets are built in memory, including small ones that ask for huge tables.
 - **Drawing:** every element type and option, the size warnings, and canvas sizes. Thirteen layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along, images in every mode, and every barcode type.
 - **Images and barcodes:** image modes, transparency, fitting and the size limits; check digits, lengths, quiet zones, guard and bearer bars for each barcode type.
 - **Images from a web address:** fetched from a small web server on this machine: images, SVG, redirects, pages that aren't images, an entity bomb, missing, oversized, endless and slow downloads, and the address rules.
 - **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer. Other tests check that a job's labels are drawn one at a time, share one date and time, and that an error names its row.
-- **The API:** requests from other sites, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
+- **The API:** requests from other sites, the headers every response carries, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
 - **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.
 
 After an intended change to what's drawn or printed, rewrite the reference files, then look at the new images before committing them:
@@ -55,13 +77,39 @@ UPDATE_REFERENCES=1 sh test.sh
 
 When output differs from a reference, the test saves this run's output in `oh-brother-tests/` in the system's temporary folder, and names the file.
 
-The editor in `app/static/` has no tests yet; it would need a browser to drive it. What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
+### The editor's tests
+
+The editor's code is split by what needs a page and what doesn't. `app.mjs` is the page: it holds the state, draws the panels, and handles the mouse and keyboard. The modules beside it work only on the values they're given, so they can be tested anywhere:
+
+| Module | Holds |
+|---|---|
+| `units.mjs` | Millimetres and inches, rounding, the snap grid |
+| `geometry.mjs` | Label sizes, snapping while moving and resizing, align, distribute, rescaling |
+| `layouts.mjs` | Element defaults and every quick layout |
+| `fields.mjs` | Which fields a layout has, and the record that fills them |
+| `elements.mjs` | Making a layout safe to edit; removing, reordering and duplicating elements |
+| `history.mjs` | The undo list |
+| `images.mjs` | The sizes an image is tried at |
+| `job.mjs` | What a click on Print sends |
+
+Their tests are in `tests/editor/`, one `.test.mjs` file for each module, written with a small harness of its own (`harness.mjs`), so nothing is installed. Among other things they build every quick layout on every tape, across and along, and check that nothing lands off the label. They run two ways:
+
+- **In a browser.** Start the app with `sh run.sh --tests` and open `/tests/editor/`. The page lists what failed and why. The tests are served only with `--tests`.
+- **Under Node**, with `node tests/editor/run.mjs`. CI does this. Node isn't needed for anything else.
+
+`sh test.sh` doesn't run them: the bundled runtime has no JavaScript. A server-side test does check that every module the editor imports exists and that `all.mjs` lists every test file.
+
+The files end in `.mjs` so that Node reads them as modules without a `package.json`. The page itself, `app.mjs`, still has no tests: clicking through the editor after a change to it is done by hand. `window.ohBrother` gives the console the editor's state to look at, since a module's own names can't be reached from there.
+
+What only a real printer can show is in the [printer checklist](printer-checklist.md), for releases that change printing.
 
 ## Continuous integration
 
 GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
 
-`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones, so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
+A second job, *Lint and editor tests*, runs the [editor's tests](#the-editors-tests) under Node and looks for mistakes that tests wouldn't run into. `shellcheck` reads the three shell scripts, `node --check` reads each of the editor's files as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
+
+`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones (`sh build.sh --newest`), so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
 
 The workflows can only read the repository and use no secrets. They use only GitHub's own actions, pinned to the commit of a release. The privacy check that runs before each commit stays local: its pattern is itself personal.
 
@@ -93,6 +141,12 @@ The app has no login, so `server.py` checks every request in `guard()`:
 
 - **Host name.** A site can point one of its own names at `127.0.0.1` (DNS rebinding), and the browser then treats the app as part of that site. Its pages send that name as the `Host`, so requests are refused with 403 unless the host is `127.0.0.1`, `localhost` or `::1`. With `--lan`, other machines reach the app by whatever name they know it by, so the check is off.
 - **JSON only.** A page on another site can send a form or plain text to any address without asking, but it can send JSON only after a CORS check, which this server never answers. So every `POST` or `PUT` must be sent as JSON, or it's refused with 415. The one exception is the data upload, a form, which only reads the file and changes nothing.
+- **Where the request comes from.** Browsers say this in the `Sec-Fetch-Site` header: `same-origin` for the editor's own page, `none` for the address bar or a bookmark, and `cross-site` or `same-site` for a page somewhere else. Requests under `/api/` with either of the last two are refused with 403, which covers the data upload too. The page itself still opens from a link anywhere. Browsers send the header only to addresses they count as secure. `127.0.0.1` and `localhost` are; a plain `http` address on the network is not ([Fetch Metadata](https://www.w3.org/TR/fetch-metadata/#sec-fetch-site-header)). So with `--lan` it's mostly absent, and a request without it is let through to the other checks.
+
+Every response also carries two headers, added in `protect()`:
+
+- **`Content-Security-Policy`** (`server.PAGE_POLICY`) lists what the editor's page may load: its own script and stylesheet, images from the app or held in the page (`blob:` for previews, `data:` for saved images), and requests to the app. Nothing comes from another site, and a script or style written into the page isn't run, so text from a template or data file can't become code even if a mistake in the editor let it into the page. `frame-ancestors 'none'` stops another site showing the editor inside its own page, where a click meant for that page could land on Print. The editor sets styles through classes and the style object, never a `style` attribute, which the policy refuses; a test checks that.
+- **`X-Content-Type-Options: nosniff`** makes the browser take each response as the type it says it is.
 
 Every error under `/api/` comes back as JSON, `{"error": "…"}`, which the editor shows. Unexpected errors are 500s, and their tracebacks go to the terminal.
 
@@ -117,7 +171,7 @@ The tests serve their images from a small web server on this machine, so they al
 
 ## Data files
 
-`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. The endpoint is `POST /api/data`. It takes the column names from the first row and makes each one different from the rest (`server.unique_headers()`): an empty name becomes `Column 3`, and a name that repeats an earlier one, ignoring case, becomes `name (2)`. Rows are sent to the editor by column name, so two columns with one name would otherwise be one.
+`tables.py` turns an uploaded file into rows of strings using only the standard library, so no spreadsheet package is bundled. It detects the format from the content, with the extension as a hint: a zip holding `content.xml` is OpenDocument and one holding `xl/workbook.xml` is Excel. Other zips, old binary `.xls` files and binary data are refused with a message. A file whose parts are missing or don't parse is reported as damaged. Text starting with a UTF-16 byte-order mark, as in Excel's *Unicode Text*, is decoded as UTF-16. Other text is decoded as UTF-8, then Windows-1252, then Latin-1. The delimiter is sniffed. OpenDocument cells give their displayed text. Excel cells hold raw values, so `tables.py` applies only date formats and zero-padded formats like `00000`, and prints other numbers with at most 15 significant digits, as Excel shows them. Repeated empty rows and cells, which spreadsheets store by the million, are dropped. A table may have a million cells (`tables.MAX_CELLS`), counting every row as wide as the widest, since each row is given every column. A spreadsheet can put a cell in its last column on every row in a few bytes each, and the empty cells before them are filled in: an Excel file under 1 MB took 2.6 GB. The count is kept as the table is built, so such a file is refused before the memory is used. The endpoint is `POST /api/data`. It takes the column names from the first row and makes each one different from the rest (`server.unique_headers()`): an empty name becomes `Column 3`, and a name that repeats an earlier one, ignoring case, becomes `name (2)`. Rows are sent to the editor by column name, so two columns with one name would otherwise be one.
 
 
 ## Editor geometry
@@ -131,6 +185,20 @@ Element positions are in millimetres from the top left of the printable area, wh
 These cut sizes are derived from brother_ql's label data, not measured.
 
 Snapping works in millimetres. Targets are the printable area's edges and centre lines, plus every other element's edges and centre lines. The snap distance is 6 screen pixels. Away from any target, positions snap to a 0.5 mm grid, or 0.02 in (0.508 mm) when using inches. Positions are stored to 0.01 mm, so snapped centres stay exact, including after the label is reshaped.
+
+## Keyboard and screen readers
+
+Tab reaches every control, and three places with many items are one stop each, so Tab doesn't have to pass through every item:
+
+- **The label.** Each element's box in the overlay can take focus (`tabindex="0"`), and focus selects it (`focusin` on `#overlay`). A click doesn't give a box focus, since it starts a drag instead, so this is the keyboard's way in only. The keys then go to the handler on `document`, as they do after a click: arrows nudge, Alt with an arrow resizes (`geometry.resizeBy()`), Enter opens the element's text. The overlay is rebuilt when the number of elements changes; if a box had focus, focus goes to the element now selected, or to the one in its place.
+- **The Elements list.** One row has `tabindex="0"`, the one `listAt` names; the rest have `-1`. The list is rebuilt on every change, so `drawList()` notes which control had focus and `focusList()` puts it back, on the same row or, after a reorder, wherever that row went. Its own `keydown` handler stops the keys there, so an arrow in the list doesn't also nudge the selection on the label.
+- **The data rows.** The previewed row has `tabindex="0"`. The rows' tick boxes are out of the Tab order (`tabindex="-1"`), or 5,000 rows would be 5,000 stops; Space on the row ticks it instead.
+
+Copy, cut and paste keep the copied elements as JSON in the browser's storage (`oh-brother:clipboard`), not on the system clipboard, which a page may read only with permission. That's why a paste works between the app's windows and nowhere else. What comes back is tidied like a template's elements (`elements.tidyElements()`), since another window, or anything else with access to the storage, wrote it. Ctrl+C and Ctrl+X leave the browser's own copy alone while text is selected on the page.
+
+For screen readers, buttons that show only a symbol have an `aria-label`, segmented buttons and selectable rows say whether they're on (`aria-pressed`), each element is named by `describe()`, and warnings are a live region. `h()` writes `true` and `false` out in full for `aria-` attributes, where other attributes are simply present or absent. One rule in `style.css` draws the focus ring, and only for focus that came from the keyboard (`:focus-visible`).
+
+None of this has been tried with a screen reader, and the keys have been tried in Chromium only.
 
 ## Fields
 
@@ -148,7 +216,7 @@ Templates are JSON files in `data/templates/`, named after the template, and sam
 
 `PUT /api/templates/<name>` won't replace an existing file (409) unless sent with `?replace=1`, which the editor adds once the user has confirmed. The check is made on the server, so a template saved from another window counts. On macOS and Windows, names that differ only in case are the same file, so they count as existing too.
 
-Only a template is saved as one: `template_fault()` wants a layout, with a list of elements if it has any, and fixed values and a column mapping that are objects. The same check runs when a template is opened, so a file that's damaged or isn't a template gets a message (422) rather than breaking the editor. The editor then fills in whatever a layout leaves out (`tidyLayout()` in `app.js`), as it does for the layout it keeps in the browser.
+Only a template is saved as one: `template_fault()` wants a layout, with a list of elements if it has any, and fixed values and a column mapping that are objects. The same check runs when a template is opened, so a file that's damaged or isn't a template gets a message (422) rather than breaking the editor. The editor then fills in whatever a layout leaves out (`tidyLayout()` in `elements.mjs`), as it does for the layout it keeps in the browser.
 
 Templates and settings are saved by `write_json()`, which writes a new file beside the old one and moves it into place. The old file stays whole if the drive fills up or is pulled out partway.
 
@@ -164,7 +232,7 @@ To retake them:
 
 1. Start a separate instance with its own port and data folder, such as `sh run.sh --no-browser --port 8630 --data <folder>`, and give it the printer address `192.168.1.50`. `.claude/launch.json` has one as `oh-brother-demo`.
 2. Set the browser pane's viewport to 1200 × 720, so the three columns and the data rows fit.
-3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `drawPrinterChip(true)`.
+3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `ohBrother.drawPrinterChip(true)`.
 4. Capture the whole pane as a PNG, 800 × 480, into `docs/images/`, and check each image for private details before committing.
 
 ## Commits
@@ -212,3 +280,5 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 | attrs | 26.1.0 | MIT |
 
 brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.
+
+Two more are fetched but never become part of the app: setuptools 84.2.1 (MIT), which pip uses to build packbits, and pyflakes 4.1.0 (MIT), which runs only in CI.

@@ -131,6 +131,8 @@ def main():
     ap.add_argument("--data", default=os.path.join(ROOT, "data"))
     ap.add_argument("--port", type=int, default=8620)
     ap.add_argument("--lan", action="store_true", help="listen on all interfaces, not just this machine")
+    ap.add_argument("--tests", action="store_true",
+                    help="also serve the editor's tests, at /tests/editor/")
     ap.add_argument("--no-browser", action="store_true",
                     help="don't open a browser; keep running until Ctrl+C")
     args = ap.parse_args()
@@ -149,12 +151,14 @@ def main():
     host = "0.0.0.0" if args.lan else "127.0.0.1"
     port = free_port(args.port, host)
     url = f"http://127.0.0.1:{port}/"   # this machine's own window uses the local address
-    app = create_app(os.path.abspath(args.data), lan=args.lan)
+    app = create_app(os.path.abspath(args.data), lan=args.lan, editor_tests=args.tests)
     server = make_server(host, port, app, threaded=True)
     # Stop with the window only when we opened it, and not when other machines may use it
     auto_stop = not args.no_browser and not args.lan
     print(f"Oh-Brother {VERSION} running at {url}  "
           + ("(closes with its window, or Ctrl+C)" if auto_stop else "(Ctrl+C to stop)"))
+    if args.tests:
+        print(f"Editor tests: {url}tests/editor/")
     if args.lan:
         ip = lan_address()
         print(f"Other devices: http://{ip}:{port}/" if ip

@@ -7,6 +7,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. There's
 | Path | Contents | In the repo? |
 |---|---|---|
 | `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
+| `requirements*.txt` | The packages and their checksums: the app's and the build tool's | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
 | `samples/` | Sample templates (`samples/templates/`) and data, read-only in the app | Yes |
 | `data/templates/` | The user's saved templates | No |
@@ -25,7 +26,26 @@ sh build.sh
 sh run.sh
 ```
 
-`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app. To move to newer versions, change the pins, rebuild and run the tests.
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app.
+
+Everything the build downloads is checked against a SHA-256 kept in the repository, and a download that doesn't match stops the build:
+
+- **The runtime.** `build.sh` holds the checksum of each platform's archive, taken from the `SHA256SUMS` file of the python-build-standalone release. The archive is downloaded whole and checked before any of it is unpacked.
+- **The packages.** Each line of the requirements files carries the checksum of the file PyPI serves for it, and pip runs with `--require-hashes`, which also refuses a package that has none. Pillow and MarkupSafe are compiled, so they have one checksum for each platform.
+- **The build tool.** packbits comes as source only, so pip builds it, and fetches setuptools to do that. `requirements-build.txt` pins and checks that as well (pip's `--build-constraint`).
+
+Each folder is built beside the one it replaces (`vendor/common.new`) and swapped in once it's complete. A build that fails, or runs without a network, leaves the last working build in place.
+
+### Changing a package
+
+1. Change its version in the requirements file and delete its `--hash` lines.
+2. Run `sh build.sh linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64`. pip stops and prints the line it wants, with the checksum of the file it downloaded. For Pillow it stops once for each platform; for MarkupSafe it prints only this machine's file, and the other three are on its PyPI page.
+3. Compare each checksum with the SHA-256 that PyPI lists for that file on the package's *Download files* page, then add it.
+4. Rebuild, run the tests, and update the table under [Third-party code](#third-party-code).
+
+For a new runtime, change `PBS_TAG` and `PY_VER` in `build.sh` and copy the four checksums from the release's `SHA256SUMS` file.
+
+`sh build.sh --newest` installs the newest version of every package instead, with no checksums, as the monthly check does. It replaces the pinned build in `vendor/`, so run `sh build.sh` again afterwards.
 
 `.claude/launch.json` starts the app for the Claude desktop preview. It's local and not in the repo.
 
@@ -61,7 +81,7 @@ The editor in `app/static/` has no tests yet; it would need a browser to drive i
 
 GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
 
-`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones, so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
+`upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones (`sh build.sh --newest`), so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
 
 The workflows can only read the repository and use no secrets. They use only GitHub's own actions, pinned to the commit of a release. The privacy check that runs before each commit stays local: its pattern is itself personal.
 
@@ -212,3 +232,5 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 | attrs | 26.1.0 | MIT |
 
 brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.
+
+One more is fetched but never becomes part of the app: setuptools 84.2.1 (MIT), which pip uses to build packbits.

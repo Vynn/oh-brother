@@ -1,18 +1,42 @@
 # Pure-Python packages, installed once into vendor/common for every platform.
 # Exact versions, so every build of a commit gets the same app; their own
 # dependencies are pinned below them. Pillow is in requirements-binary.txt.
-brother-ql-inventree==1.3
-flask==3.1.3
-python-barcode==0.16.1
-qrcode==8.2
+#
+# Each has the SHA-256 of the file PyPI serves for it, and build.sh refuses a
+# download that doesn't match. To change a version, see "Changing a package"
+# in docs/development.md.
+brother-ql-inventree==1.3 \
+    --hash=sha256:0f7e0d78bae04f44bcfe1010ed0d99f98d5b4db1d6179da242d5bd52bb0c9ea4
+flask==3.1.3 \
+    --hash=sha256:f4bcbefc124291925f1a26446da31a5178f9483862233b23c0c96a20701f670c
+python-barcode==0.16.1 \
+    --hash=sha256:5776567478c9a0dae473374bb86631ba0b5ea99aaf302763b364e367ac51f367
+qrcode==8.2 \
+    --hash=sha256:16e64e0716c14960108e85d853062c9e8bba5ca8252c0b4d0231b9df4060ff4f
 
 # What the packages above depend on
-attrs==26.1.0
-blinker==1.9.0
-click==8.5.0
-itsdangerous==2.2.0
-jinja2==3.1.6
-markupsafe==3.0.4
-packbits==0.6
-pyusb==1.3.1
-werkzeug==3.1.9
+attrs==26.1.0 \
+    --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309
+blinker==1.9.0 \
+    --hash=sha256:ba0efaa9080b619ff2f3459d1d500c57bddea4a6b424b60a91141db6fd2f08bc
+click==8.5.0 \
+    --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
+itsdangerous==2.2.0 \
+    --hash=sha256:c6242fc49e35958c8b15141343aa660db5fc54d4f13a1db01a3f5891b98700ef
+jinja2==3.1.6 \
+    --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
+# MarkupSafe comes with a compiled speed-up, so there is a file for each
+# platform the build may run on: Linux x86_64, Linux ARM, macOS Apple Silicon
+# and macOS Intel, in that order. Elsewhere it uses its plain Python code.
+markupsafe==3.0.4 \
+    --hash=sha256:434139499bb20b502ed3baa1f169e618f924a97e7a777fea1a49446d80106cf6 \
+    --hash=sha256:7018d4af1cd272e847aa5917983ab5e83e4f6579f9dbfecd4a79c0ca80b144c2 \
+    --hash=sha256:73e77980c7207854f00fc4e71fb1626868d5740ab4012623d55c7a99ad122a72 \
+    --hash=sha256:2d1b7d9308288661f56672b1b157d75fc536714d3638487bbea17b6318a78248
+# Source only: pip builds it, with the setuptools in requirements-build.txt
+packbits==0.6 \
+    --hash=sha256:bc6b370bb34e04ac8cfa835e06c0484380affc6d593adb8009dd6c0f7bfff034
+pyusb==1.3.1 \
+    --hash=sha256:bf9b754557af4717fe80c2b07cc2b923a9151f5c08d17bdb5345dac09d6a0430
+werkzeug==3.1.9 \
+    --hash=sha256:6392e50c78460ba618e5b21f08a71f59c99ce99cdc6cf6e3dd7e6ccca8754fab

@@ -2,6 +2,12 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.5.0 · not yet released
+
+### Changed
+
+- Everything `build.sh` downloads is checked against a SHA-256 kept in the repository: the Python runtime, every package, and the tool pip uses to build one of them. A download that doesn't match stops the build. Each folder is built beside the one it replaces and swapped in when complete, so a build that fails, or runs with no network, leaves the last working one in place. It used to delete the packages first.
+
 ## 0.4.2 · 2026-11-10
 
 Large print jobs that stay quick, a question before a big one, and fixes from a review of the code.

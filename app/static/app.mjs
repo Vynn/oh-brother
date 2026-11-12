@@ -12,6 +12,7 @@ import { History } from "./history.mjs";
 import { IMAGE_MAX, sidesToTry, sizeAt } from "./images.mjs";
 import * as job from "./job.mjs";
 import { CATS, PRESETS, checkEls, imageOf, newElement, roundAll } from "./layouts.mjs";
+import { STATUS_EVERY_MS, chipState } from "./printerstate.mjs";
 import { fmt, fmt2, fromUnit, imperial, nudgeStep, r2, setUnits, tapeName, toUnit, units } from "./units.mjs";
 
 const $ = (s) => document.querySelector(s);
@@ -34,7 +35,8 @@ const api = async (path, opts = {}) => {
     body: opts.body && !(opts.body instanceof FormData) ? JSON.stringify(opts.body) : opts.body,
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(j.error || `${r.status} ${r.statusText}`), { status: r.status });
+  // ask: the server will do it, once told to go ahead anyway (a print the printer's status argues against)
+  if (!r.ok) throw Object.assign(new Error(j.error || `${r.status} ${r.statusText}`), { status: r.status, ask: !!j.ask });
   return j;
 };
 
@@ -58,6 +60,7 @@ const S = {
   blank: new Map(),     // element index -> "empty"|"invalid": codes, images and text the last preview left blank
   glyph: null,          // the last image chosen, for quick layouts with an empty image slot
   scale: 1,             // screen px per dot
+  printer: null,        // the last answer from /api/status, null until there is one
 };
 
 const STORE = "oh-brother:v1";
@@ -208,6 +211,7 @@ let renderTimer = 0, renderBusy = false, renderAgain = false, previewURL = null;
 
 // delay: debounce for typing; 0 while dragging
 function schedule(delay = 90) {
+  if (S.meta && S.layout.tape !== statusTape) refreshStatus();   // another tape: does the printer's suit it?
   saveSoon();
   checkpointSoon();
   drawOverlay();
@@ -1263,10 +1267,23 @@ $("#printBtn").addEventListener("click", async () => {
     // rows: each record's row number as the Data table shows it, so the
     // server can name the row a label failed on
     const rows = jobRows();
-    const j = await api("/api/print", { method: "POST", body: {
+    const send = (anyway) => api("/api/print", { method: "POST", body: {
       layout: S.layout, records: rows ? rows.map((i) => record(S.data.rows[i])) : [record(null)],
-      rows: rows?.map((i) => i + 1), chain: chain(), copies: copies(), cut: $("#cut").checked } });
+      rows: rows?.map((i) => i + 1), chain: chain(), copies: copies(), cut: $("#cut").checked, anyway } });
+    // Before sending, the server asks the printer what it has loaded. A
+    // different tape, an open cover or no tape comes back as a question, since
+    // the printer's answer may be wrong: one click prints anyway.
+    let j;
+    try {
+      j = await send(false);
+    } catch (e) {
+      if (!e.ask) throw e;
+      if (!confirm(`${e.message}. Print anyway?`)) { status(`Not sent: ${e.message}`, "err"); return; }
+      status("Sending…");
+      j = await send(true);
+    }
     status(`Sent ${j.labels} label${j.labels === 1 ? "" : "s"}` + (j.warnings.length ? ` · ${j.warnings.length} warning(s)` : ""), "ok");
+    refreshStatus();   // printing, perhaps, or out of labels
     if (j.warnings.length) drawWarnings(j.warnings);
   } catch (e) {
     status(e.message, "err");
@@ -1279,14 +1296,52 @@ $("#printBtn").addEventListener("click", async () => {
 // Printer settings
 // ---------------------------------------------------------------------------
 
-function drawPrinterChip(ok) {
-  const c = S.meta.config;
-  $("#printerLabel").textContent = c.printer_host ? `${c.model} · ${c.printer_host}` : "No printer set";
-  $("#printerDot").className = "dot" + (ok === true ? " ok" : ok === false ? " bad" : "");
-  // The dot's colour, in words
-  $("#printerChip").setAttribute("aria-label", "Printer settings. " + $("#printerLabel").textContent
-    + (ok === true ? ", connected" : ok === false ? ", not answering" : ""));
+// The printer chip says what the printer is doing, then its tape, from the
+// last answer from /api/status (printerstate.mjs). `info` replaces that
+// answer, for the README's screenshots.
+let saidState = "";
+function drawPrinterChip(info = S.printer) {
+  const c = chipState(S.meta.config, info), chip = $("#printerChip");
+  $("#printerDot").className = "dot" + (c.dot ? " " + c.dot : "");
+  $("#printerLabel").textContent = c.text;
+  $("#printerDetail").textContent = c.detail ? `· ${c.detail}` : "";
+  chip.classList.toggle("trouble", c.trouble);
+  chip.title = c.title;
+  const words = c.text + (c.detail ? `, ${c.detail}` : "");
+  chip.setAttribute("aria-label", `Printer settings. ${words}`);
+  // A new state is read out by screen readers; the same one again, five seconds later, isn't
+  if (words !== saidState) { $("#printerSaid").textContent = `Printer: ${words}`; saidState = words; }
 }
+
+// In the print bar: a tape loaded that this layout doesn't suit. Printing
+// still asks; this says so beforehand, so the tape or the layout can be changed.
+function drawTapeNote() {
+  const m = statusTape === S.layout.tape ? S.printer?.mismatch : null;
+  // Two parts that keep together, so a narrow bar breaks the line between them
+  $("#tapeNote").replaceChildren(...(m ? [h("b", {}, `${m.loaded} loaded`),
+    ...(m.wanted ? [" · ", h("span", {}, `this layout is for ${m.wanted}`)] : [])] : []));
+}
+
+// Ask the printer how it is, every few seconds while the window is in front.
+// A hidden window stops asking, and asks again when it comes back.
+let statusTimer = 0, statusBusy = false, statusTape = null;
+async function refreshStatus() {
+  clearTimeout(statusTimer);
+  if (document.visibilityState !== "visible") return;
+  if (!S.meta.config.printer_host) {
+    S.printer = null; statusTape = S.layout.tape;
+  } else if (!statusBusy) {
+    statusBusy = true;
+    statusTape = S.layout.tape;   // set first, so a failed request isn't retried on every edit
+    try {
+      S.printer = await api(`/api/status?tape=${encodeURIComponent(statusTape)}`);
+    } catch {}   // the app itself didn't answer: the chip stays as it was
+    statusBusy = false;
+  }
+  drawPrinterChip(); drawTapeNote();
+  statusTimer = setTimeout(refreshStatus, STATUS_EVERY_MS);
+}
+document.addEventListener("visibilitychange", refreshStatus);
 
 function openSettings() {
   const c = S.meta.config;
@@ -1302,13 +1357,14 @@ async function saveSettings() {
   const j = await api("/api/config", { method: "POST", body: {
     printer_host: $("#cfgHost").value.trim(), printer_port: +$("#cfgPort").value || 9100, model: $("#cfgModel").value } });
   S.meta.config = j.config;
+  S.printer = null;   // another printer, perhaps: "Checking the printer…" until it answers
   drawPrinterChip();
 }
 
 async function testPrinter(target) {
   const j = await api("/api/test", { method: "POST", body: {} });   // the server takes only JSON
-  drawPrinterChip(j.ok);
   if (target) { target.textContent = j.message; target.className = "status " + (j.ok ? "ok" : "err"); }
+  refreshStatus();
   return j.ok;
 }
 
@@ -1332,7 +1388,7 @@ $("#cfgTest").addEventListener("click", async () => {
 
 // Module code isn't reachable from the browser's console, so the few things
 // worth reaching are put here: the state, to look at, and the printer chip,
-// which the README's screenshots set to "connected" (docs/development.md)
+// which the README's screenshots set to a ready printer (docs/development.md)
 window.ohBrother = { state: S, drawPrinterChip };
 
 (async function boot() {
@@ -1350,6 +1406,6 @@ window.ohBrother = { state: S, drawPrinterChip };
   }
   drawAll(); drawPrinterChip(); drawTemplates(); schedule();
   checkpoint();
-  if (S.meta.config.printer_host) testPrinter();
+  refreshStatus();
   new ResizeObserver(fit).observe($("#stage"));
 })();

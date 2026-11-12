@@ -2,6 +2,18 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.6.0 · unreleased
+
+The printer says what it has loaded and whether it's ready.
+
+### Added
+
+- Before printing, the app asks the printer what tape it has and whether anything's wrong. If another tape is loaded, the cover is open or there's no tape, it asks before sending: "The printer has 29 × 90 mm labels loaded; this layout is for 62 mm continuous · black/red. Print anyway?" It used to send the job whatever was loaded, and the printer then stopped with an error. The printer's answer could be wrong, so it only ever asks.
+- The printer chip, top right, says what the printer is doing and what tape it has: "Ready · 62 mm black/red", "Printing", or in red "Cover open", "No tape" or "Not answering". It asks the printer every 5 seconds while the editor is in front. It used to show the printer's model and address, which are now in its tooltip, and a dot set only when the app started or the settings were tested.
+- When the printer has a tape loaded that the layout isn't for, the print bar says so beside Print, before you press it.
+- *Test connection* says what the printer reports, such as "Printer reachable · Ready · 62 mm black/red continuous tape" or "Cover open".
+- The app asks over SNMP, which Brother's network printers answer from the factory. Read from a QL-820NWB with 62 mm black/red tape, 29 × 90 mm labels, no tape and the cover open; other tapes, errors and printers aren't tested yet. A printer that doesn't answer prints as before.
+
 ## 0.5.0 · 2026-11-11
 
 The editor from the keyboard, tests for its code, and checked downloads.

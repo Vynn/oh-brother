@@ -7,5 +7,6 @@ import "./elements.test.mjs";
 import "./history.test.mjs";
 import "./images.test.mjs";
 import "./job.test.mjs";
+import "./printerstate.test.mjs";
 
 export { run } from "./harness.mjs";

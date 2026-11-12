@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study · Printer status in the editor</title>
+<style>
+/* The editor's own tokens (app/static/style.css), copied so this page stands alone */
+:root {
+  --bg: #f4f3f1; --panel: #fbfbfa; --surface: #ffffff; --line: #e2e0dc; --line-strong: #cbc8c2;
+  --text: #1c1b1a; --muted: #6f6c66; --faint: #a19d96; --ink: #141414;
+  --red: #d42b20; --red-soft: #fbe9e7; --accent: #2f6fdf; --ok: #2f8f4e; --warn: #a8660b;
+  --font: system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --mono: ui-monospace, "DejaVu Sans Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 13px/1.45 var(--font); color: var(--text); background: var(--bg); }
+main { max-width: 1040px; margin: 0 auto; padding: 40px 32px 80px; }
+h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 6px; }
+h2 { font-size: 15px; font-weight: 650; margin: 44px 0 4px; }
+h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
+p { margin: 0 0 10px; max-width: 70ch; }
+.lede { font-size: 14px; color: var(--muted); }
+.note { color: var(--muted); }
+code { font-family: var(--mono); font-size: 12px; background: #efede9; padding: 0 3px; border-radius: 3px; }
+.rec { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 11px; font-weight: 600; vertical-align: 2px; }
+
+/* A strip of the editor's top bar, one per state */
+.states { display: grid; grid-template-columns: 170px 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.states > div { padding: 0 14px; display: flex; align-items: center; min-height: 52px; border-top: 1px solid var(--line); }
+.states > div:nth-child(-n+2) { border-top: 0; }
+.states .what { color: var(--muted); font-size: 12px; background: var(--panel); border-right: 1px solid var(--line); }
+.states .bar { justify-content: space-between; gap: 16px; background: var(--panel); }
+.bar .brand { font-weight: 650; display: flex; align-items: center; gap: 8px; color: var(--text); }
+.bar .brand i { width: 14px; height: 14px; border-radius: 2px; background: linear-gradient(var(--ink) 0 50%, var(--red) 50% 100%); }
+
+/* The chip as it is today, and its variants */
+.chip { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); background: var(--surface);
+  border-radius: 999px; padding: 4px 12px; font: inherit; color: var(--text); white-space: nowrap; }
+.chip .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot.ok { background: var(--ok); } .dot.bad { background: var(--red); } .dot.warn { background: var(--warn); }
+.dot.hollow { background: none; box-shadow: inset 0 0 0 1.5px var(--faint); }
+.chip .sub { color: var(--muted); }
+.chip.trouble { border-color: #efc4bf; background: var(--red-soft); }
+.chip.trouble .say { color: #b3261e; font-weight: 600; }
+.chip.two { flex-direction: row; padding: 3px 12px; border-radius: 10px; }
+.chip.two .lines { display: flex; flex-direction: column; line-height: 1.2; }
+.chip.two .lines small { font-size: 10.5px; color: var(--muted); }
+
+/* The print bar, for where a tape that doesn't suit the layout is shown */
+.printbar { display: flex; align-items: center; gap: 16px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.printbar .spacer { flex: 1; }
+.printbar .field { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.printbar input[type=number] { width: 64px; height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; font: inherit; }
+.printbar button { height: 34px; padding: 0 22px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #fff; font: inherit; font-weight: 600; }
+.printbar .warn-line { color: #b3261e; font-size: 12px; display: flex; align-items: center; gap: 6px; }
+.printbar .warn-line b { font-weight: 600; }
+
+table.facts { border-collapse: collapse; margin: 8px 0 0; font-size: 12px; }
+table.facts th, table.facts td { text-align: left; padding: 5px 14px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.facts th { color: var(--muted); font-weight: 600; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(0,0,0,.08); }
+ol.decide { padding-left: 20px; } ol.decide li { margin: 0 0 8px; max-width: 75ch; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Printer status in the editor</h1>
+<p class="lede">Study for review item 23. The editor can now ask the printer what it's doing and what tape it has. This page shows ways the printer chip at the top right could say so, and where a tape that doesn't suit the layout could be shown.</p>
+<p><strong>Decided, 2026-11-12, and built:</strong> option A, the state in the chip; D1, a tape that doesn't suit the layout shown in the print bar as well; no new red: trouble uses the label red <code>#d42b20</code> on white (5.0 : 1), not the darker red proposed below, so the chip's trouble state has a red border on white rather than a pink fill; and the printer is asked every 5 seconds to start with.</p>
+
+<h3>What the printer can tell us</h3>
+<p>Read over SNMP from a QL-820NWB in each of these states. The address below, <code>192.168.1.50</code>, is a placeholder.</p>
+<table class="facts">
+  <tr><th>State</th><th>Read from the printer</th><th>Tested on the printer</th></tr>
+  <tr><td>Ready</td><td>the loaded tape: continuous or die-cut, width, length, and black/red or black only</td><td>yes, with 62 mm black/red and 29 × 90 mm labels</td></tr>
+  <tr><td>Cover open</td><td>an error, and the printer's display says COVER OPEN</td><td>yes</td></tr>
+  <tr><td>No tape</td><td>no media; not an error while the printer is idle</td><td>yes</td></tr>
+  <tr><td>Printing</td><td>a "printing" phase</td><td>no, not yet seen</td></tr>
+  <tr><td>Cutter jam, labels run out</td><td>error flags</td><td>no</td></tr>
+  <tr><td>SNMP switched off</td><td>nothing: only that port 9100 takes a connection, as today</td><td>no</td></tr>
+</table>
+<p class="note" style="margin-top:10px">The editor would ask every 5 seconds while its window is open and in front, after each print, and when <em>Test connection</em> is pressed. No animation is used: a state change is a change of words and colour.</p>
+
+<!-- ======================================================================= -->
+<h2>A · The state in the chip <span class="rec">recommended</span></h2>
+<p>The chip says what the printer is doing, then the tape. The model and address move to its tooltip and the settings dialog, where they're set. Trouble turns the chip red, in words as well as colour.</p>
+<div class="states">
+  <div class="what">No printer set</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip"><span class="dot"></span>No printer set</span></div>
+  <div class="what">First check</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip"><span class="dot hollow"></span><span class="sub">Checking the printer…</span></span></div>
+  <div class="what">Ready</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip" title="QL-820NWB at 192.168.1.50 · display: READY"><span class="dot ok"></span>Ready <span class="sub">· 62 mm black/red</span></span></div>
+  <div class="what">Ready, die-cut</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip"><span class="dot ok"></span>Ready <span class="sub">· 29 × 90 mm labels</span></span></div>
+  <div class="what">Printing</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip"><span class="dot ok"></span>Printing</span></div>
+  <div class="what">Cover open</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip trouble"><span class="dot bad"></span><span class="say">Cover open</span></span></div>
+  <div class="what">No tape</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip trouble"><span class="dot bad"></span><span class="say">No tape</span></span></div>
+  <div class="what">Gives no status</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip"><span class="dot ok"></span>Connected <span class="sub">· no status</span></span></div>
+  <div class="what">Not answering</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip trouble"><span class="dot bad"></span><span class="say">Not answering</span></span></div>
+</div>
+<p class="note" style="margin-top:8px"><strong>For:</strong> the first word answers "can I print?". Short, so it never crowds the undo buttons. <strong>Against:</strong> the address is no longer on screen; with two printers you'd hover to see which one is set.</p>
+
+<!-- ======================================================================= -->
+<h2>B · Two lines</h2>
+<p>The chip keeps today's model and address on a small first line, with the state below.</p>
+<div class="states">
+  <div class="what">Ready</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip two"><span class="dot ok"></span><span class="lines"><small>QL-820NWB · 192.168.1.50</small>Ready · 62 mm black/red</span></span></div>
+  <div class="what">Cover open</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip two trouble"><span class="dot bad"></span><span class="lines"><small>QL-820NWB · 192.168.1.50</small><span class="say">Cover open</span></span></span></div>
+  <div class="what">Not answering</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip two trouble"><span class="dot bad"></span><span class="lines"><small>QL-820NWB · 192.168.1.50</small><span class="say">Not answering</span></span></span></div>
+</div>
+<p class="note" style="margin-top:8px"><strong>For:</strong> nothing is hidden. <strong>Against:</strong> 10.5 px text in the top bar, twice the chip's height, and the line you read first is the one that changes least.</p>
+
+<!-- ======================================================================= -->
+<h2>C · Today's chip, with a coloured dot only</h2>
+<p>The chip stays <code>QL-820NWB · 192.168.1.50</code>; the dot's colour carries the state, and the words go in its tooltip.</p>
+<div class="states">
+  <div class="what">Ready</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip" title="Ready · 62 mm black/red"><span class="dot ok"></span>QL-820NWB · 192.168.1.50</span></div>
+  <div class="what">Cover open</div><div class="bar"><span class="brand"><i></i>Oh-Brother</span><span class="chip" title="Cover open"><span class="dot bad"></span>QL-820NWB · 192.168.1.50</span></div>
+</div>
+<p class="note" style="margin-top:8px"><strong>For:</strong> no change to the layout. <strong>Against:</strong> colour alone says it, which fails anyone who can't tell green from red, and a screen reader hears no change. Shown for comparison; I wouldn't build it.</p>
+
+<!-- ======================================================================= -->
+<h2>D · A tape that doesn't suit the layout</h2>
+<p>That's about the layout as much as the printer, so it doesn't belong in the chip. Today it's a question when Print is pressed (built: <em>"The printer has 29 × 90 mm labels loaded; this layout is for 62 mm continuous · black/red. Print anyway?"</em>). It could also show in the print bar beforehand:</p>
+<h3>D1 · In the print bar as well <span class="rec">recommended</span></h3>
+<div class="printbar">
+  <label class="field">Copies <input type="number" value="1"></label>
+  <span class="spacer"></span>
+  <span class="warn-line" role="status"><b>29 × 90 mm labels loaded</b> · this layout is for 62 mm</span>
+  <button type="button">Print 1 label</button>
+</div>
+<p class="note" style="margin-top:8px">Seen while you work, so you can change the tape or the layout before pressing Print. The question when Print is pressed stays.</p>
+<h3>D2 · Only the question when Print is pressed</h3>
+<p class="note">As built now. Nothing on screen until then.</p>
+
+<!-- ======================================================================= -->
+<h2>Colour and contrast</h2>
+<table class="facts">
+  <tr><th>Colour</th><th>Role</th><th>On white</th><th>Used for text?</th></tr>
+  <tr><td><span class="sw" style="background:#1c1b1a"></span><code>#1c1b1a</code> text</td><td>the state's first word</td><td>17.2 : 1</td><td>yes</td></tr>
+  <tr><td><span class="sw" style="background:#6f6c66"></span><code>#6f6c66</code> muted</td><td>the tape, after the state</td><td>5.2 : 1</td><td>yes</td></tr>
+  <tr><td><span class="sw" style="background:#b3261e"></span><code>#b3261e</code> red ink (new)</td><td>trouble, on <code>#fbe9e7</code></td><td>6.5 : 1, 5.6 : 1 on its pink</td><td>yes</td></tr>
+  <tr><td><span class="sw" style="background:#d42b20"></span><code>#d42b20</code> label red</td><td>the trouble dot; stays "prints red" elsewhere</td><td>5.0 : 1</td><td>dot only here</td></tr>
+  <tr><td><span class="sw" style="background:#2f8f4e"></span><code>#2f8f4e</code> ok</td><td>the ready dot</td><td>4.1 : 1</td><td>no, too light for text</td></tr>
+  <tr><td><span class="sw" style="background:#a19d96"></span><code>#a19d96</code> faint</td><td>the dot with no printer set</td><td>2.7 : 1</td><td>no</td></tr>
+</table>
+<p class="note" style="margin-top:10px">A new, darker red for trouble text, so the label red keeps meaning "prints red". The chip's text is also its name for screen readers, and a change in it is announced.</p>
+
+<h2>To decide</h2>
+<ol class="decide">
+  <li>The chip: <strong>A</strong>, B, or C.</li>
+  <li>A tape that doesn't suit the layout: <strong>D1</strong> (print bar as well) or D2 (only the question).</li>
+  <li>The darker red <code>#b3261e</code> for trouble text, as a new colour in the app.</li>
+  <li>How often to ask the printer: every <strong>5 seconds</strong> while the window is in front, or another interval.</li>
+</ol>
+
+</main>
+</body>
+</html>

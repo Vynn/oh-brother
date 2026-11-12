@@ -20,7 +20,7 @@ On a fresh copy, run `sh build.sh` once (it needs internet). Then:
 sh run.sh
 ```
 
-The app opens in a new window of your default browser (on macOS it may be a tab). Click the printer chip (top right) and enter the printer's IP address. The printer's port is 9100, which is already filled in.
+The app opens in a new window of your default browser (on macOS it may be a tab). Click the printer chip (top right) and enter the printer's IP address. The printer's port is 9100, which is already filled in. From then on the chip says what the printer is doing and what tape it has, such as "Ready · 62 mm black/red" or, in red, "Cover open".
 
 The app stops by itself about 10 seconds after you close its last window or tab, so a reload won't stop it. Ctrl+C in the terminal also stops it.
 
@@ -80,7 +80,7 @@ The app stops by itself about 10 seconds after you close its last window or tab,
 
 ![The Layered shelf tag quick layout: a star image beside the category, the price in an outlined box with a note under it, then the product name and variant, with the Retail quick layouts on the left and the image's properties on the right](docs/images/layered-shelf-tag.png)
 
-The preview is exactly what prints. Over the network the printer doesn't report back, so "Sent" means the job reached it.
+The preview is exactly what prints. If the printer has a tape loaded that the layout isn't for, the print bar says so. Before printing, the app asks the printer what tape it has and whether it's ready. If another tape is loaded, the cover is open or there's no tape, it asks before sending, since the printer's answer could be wrong. *Test connection* says what the printer reports, such as "Ready · 62 mm black/red continuous tape". The printer is asked over SNMP, which Brother's network printers have switched on from the factory. A printer that doesn't answer prints as before, and "Sent" then means the job reached it.
 
 **Red too light or uneven?** How dark red prints is a setting on the printer, not in the app. On the QL-820NWB it's under *Menu* → *Settings* → *Print Density (2 colors)* → *Color 2 (Red)*; Brother's Printer Setting Tool has it as *Print Density (Red)*. Raising it to +2 made red print evenly on the printer the app is tested with. Lines across solid red areas are a different problem, which [Brother's FAQ](https://support.brother.com/g/b/faqend.aspx?c=us&lang=en&prod=lpql820nwbeus&ftype3=100182&faqid=faqp00100315_000) fixes by turning or cleaning the roller.
 

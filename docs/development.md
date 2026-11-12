@@ -6,7 +6,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. The Jav
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `status.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
 | `requirements*.txt` | The packages and their checksums: the app's, the build tool's and CI's | Yes |
 | `app/static/` | The editor: `index.html`, `style.css`, and its code in `.mjs` modules | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
@@ -15,6 +15,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. The Jav
 | `data/templates/` | The user's saved templates | No |
 | `data/config.json` | Printer address, per machine | No |
 | `docs/images/` | Screenshots for the README | Yes |
+| `design/` | Studies for new UI, standalone HTML pages to open in a browser | Yes |
 | `.github/workflows/` | Continuous integration on GitHub Actions | Yes |
 | `runtime/<platform>/` | Standalone Python | No, built |
 | `vendor/common/` | Pure-Python packages, shared by all platforms | No, built |
@@ -65,6 +66,7 @@ They cover the server side, against a temporary data folder:
 - **Drawing:** every element type and option, the size warnings, and canvas sizes. Thirteen layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along, images in every mode, and every barcode type.
 - **Images and barcodes:** image modes, transparency, fitting and the size limits; check digits, lengths, quiet zones, guard and bearer bars for each barcode type.
 - **Images from a web address:** fetched from a small web server on this machine: images, SVG, redirects, pages that aren't images, an entity bomb, missing, oversized, endless and slow downloads, and the address rules.
+- **Printer status:** decoding the printer's status block in every state seen on a real printer, and every error bit; matching the loaded roll to the tape list; and the question before printing. A fake SNMP agent, a UDP listener on this machine, answers as a QL-820NWB did, and also falls silent, answers another request, or sends damaged replies. The status blocks are built from the layout brother_ql documents.
 - **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer. Other tests check that a job's labels are drawn one at a time, share one date and time, and that an error names its row.
 - **The API:** requests from other sites, the headers every response carries, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
 - **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.
@@ -126,6 +128,57 @@ A layout can come from anywhere, so `render.py` and `tapes.py` hold it to limits
 `/api/print` doesn't draw the labels first. It hands `build_job()` a `Labels` object, which draws each label when brother_ql reaches it, so one label's image is in memory at a time rather than all of them. brother_ql needs only the number of images and one pass through them. The warnings are complete once the job is built, and the job is sent only then, so an error in any row prints nothing. The error names the row, from the row numbers the editor sends with the records. Every label of a job gets the same date and time for the built-in fields.
 
 The job goes to port 9100 with a plain socket write. brother_ql's own network backend isn't used: it connects without a timeout, and it can't read status back over the network anyway.
+
+## Printer status
+
+`status.py` asks the printer what it's doing and what tape it has. A QL-820NWB sends nothing back on port 9100, whatever it's asked: `ESC i S`, the status request, got no reply, alone or after the reset Brother's format puts first. It does answer SNMP, version 2c with the community `public`, and Brother's own part of its SNMP tables holds the same 32-byte status block it sends over USB, which brother_ql describes (`reader.py`, `RESP_BYTE_NAMES`). One GET reads two entries:
+
+| Entry | OID | Holds |
+|---|---|---|
+| Brother's status block | `1.3.6.1.4.1.2435.3.3.9.1.6.1.0` | error bits (bytes 8 and 9), tape width (10), media type (11), length (17), status type (18), phase (19), colour (25) |
+| Printer-MIB display text | `1.3.6.1.2.1.43.16.5.1.2.1.1` | the first line of the printer's display, such as `READY` or `COVER OPEN` |
+
+SNMP is encoded by hand with the standard library: a GET is a few dozen bytes, and the reply is checked for its request id and taken apart with bounds checks, so a damaged one is dropped. The printer gets a second to answer. One that doesn't, or has SNMP switched off, has no status, and the app works as it did before: it knows only whether port 9100 takes a connection.
+
+`decode()` turns the block into a state (`ready`, `printing` or `error`), the errors in plain words, and the loaded tape. `matching_tapes()` finds the tape or tapes in `tapes.py` it could be: continuous tape by width and colour, die-cut labels by width and length. The printer gives whole millimetres and brother_ql's table has Brother's nominal sizes, a millimetre out for a few labels, so an exact match wins and anything within a millimetre is next. `fits()` says whether a layout's tape suits what's loaded. Black-only 62 mm layouts print on black/red tape.
+
+Before a print, `/api/print` reads the status. An error, no tape, or a different tape comes back as 409 with `ask: true` and the reason, and the editor asks whether to print anyway, sending again with `anyway: true`. The printer's reading may be wrong, so it only ever asks. A dry run doesn't ask the printer. `GET /api/status` gives the status and a summary for the editor, and *Test connection* adds the summary to its message.
+
+What was read from a real QL-820NWB, and what wasn't:
+
+| State | What the printer reported | Tested on the printer |
+|---|---|---|
+| Ready, 62 mm black/red continuous (DK-2251) | continuous, 62 mm, length 0, byte 25 `0x81` | yes |
+| Cover open | error bit for the cover, status type "error", display `COVER OPEN` | yes |
+| 29 × 90 mm die-cut | die-cut, 29 by 90 mm, byte 25 `0x01` | yes |
+| No roll | no media, and no error while the printer is idle | yes |
+| Printing | the phase byte | no |
+| Cutter jam, labels run out, other errors | the error bits | no |
+| Black-only continuous tape | byte 25 | no |
+| QL-810W, other firmware, SNMP switched off | | no |
+
+### The printer chip
+
+The editor asks `GET /api/status?tape=<the layout's tape>` every 5 seconds while its window is in front (`STATUS_EVERY_MS` in `printerstate.mjs`), when the window comes back to the front, when the layout's tape changes, after a print, and after *Test connection*. A hidden window doesn't ask. For a printer that gives no status, the server says whether port 9100 takes a connection, and remembers the answer for 30 seconds rather than opening a connection to the job port every 5 seconds.
+
+`chipState()` in `printerstate.mjs` decides what the chip says, and the editor's tests cover each state. Decided in `design/printer-status.html`:
+
+| State | Chip | Dot |
+|---|---|---|
+| No printer address | No printer set | grey |
+| Before the first answer | Checking the printer… | grey ring |
+| Ready | Ready · 62 mm black/red, or · 29 × 90 mm labels | green |
+| Printing | Printing | green |
+| An error | Cover open, The cutter is jammed, … | red, with the words in red |
+| No roll | No tape | red, with the words in red |
+| No status, port 9100 open | Connected · no status | green |
+| No status, port 9100 closed | Not answering | red, with the words in red |
+
+The model, address and the printer's own display text are in the chip's tooltip. Trouble is red in words as well as the dot, never colour alone. The trouble text is the label red `#d42b20` on white, 5.0:1. No new colour was added for it, so red in the editor still means "prints red" or "something's wrong". The green `#2f8f4e` is 4.1:1 on white, too light for text, so it's used only for the dot. Screen readers hear the chip's state as its name, and a state that changes is announced once, through a hidden live region (`#printerSaid`).
+
+When the printer has a tape loaded that the layout doesn't suit, the print bar says so beside Print: "**29 × 90 mm labels loaded** · this layout is for 62 mm continuous · black/red". It wraps between its two parts, so it never pushes the Print button out. Printing still asks.
+
+Byte 25 isn't one brother_ql decodes for these tapes. It was `0x81` with black/red tape and `0x01` with black-only die-cut labels, so its top bit is taken to mean two-colour tape. A black-only 62 mm roll would confirm it; until then, a black-only roll could be taken for black/red, or the other way round.
 
 ## Launching and stopping
 
@@ -232,7 +285,7 @@ To retake them:
 
 1. Start a separate instance with its own port and data folder, such as `sh run.sh --no-browser --port 8630 --data <folder>`, and give it the printer address `192.168.1.50`. `.claude/launch.json` has one as `oh-brother-demo`.
 2. Set the browser pane's viewport to 1200 × 720, so the three columns and the data rows fit.
-3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip's dot is set to connected from the page with `ohBrother.drawPrinterChip(true)`.
+3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip is set to a ready printer from the page with `ohBrother.drawPrinterChip({status: {state: "ready", errors: [], tape: {kind: "continuous", width_mm: 62, length_mm: 0, two_colour: true}}})`. It shows "Ready · 62 mm black/red", until the next check puts it back, five seconds later; the images in the README were taken before 0.6 and still show the old chip.
 4. Capture the whole pane as a PNG, 800 × 480, into `docs/images/`, and check each image for private details before committing.
 
 ## Commits

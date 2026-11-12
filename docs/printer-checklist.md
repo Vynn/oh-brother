@@ -42,6 +42,16 @@ Note anything that fails, with a photo of the label, before releasing.
 - [ ] On die-cut labels, the print sits inside the label, as in the preview.
 - [ ] On 12 mm or 29 mm continuous tape, the *Single line* quick layout prints in full, with nothing cut off at the edges.
 
+## Printer status
+
+- [ ] With DK-2251 loaded, *Test connection* says "Printer reachable · Ready · 62 mm black/red continuous tape", and the printer chip says "Ready · 62 mm black/red".
+- [ ] Open the cover: within about 5 seconds the chip turns red and says "Cover open". Close it, and it's back to "Ready".
+- [ ] With 29 × 90 mm labels loaded and a 62 mm layout open, the print bar says "29 × 90 mm labels loaded · this layout is for 62 mm continuous · black/red". Switching the layout to 29 × 90 mm makes it go.
+- [ ] With the cover open, *Test connection* says "Cover open", and *Print* asks "Cover open. Print anyway?". Cancel sends nothing.
+- [ ] With 29 × 90 mm labels loaded and a 62 mm layout, *Print* asks, naming both tapes. *OK* prints anyway.
+- [ ] With no roll in, *Print* asks "No tape. Print anyway?".
+- [ ] With black-only 62 mm tape, *Test connection* says "62 mm continuous tape", without "black/red". Not yet checked: this is the guess about byte 25 in the developer notes.
+
 ## When the printer can't be reached
 
 - [ ] With the printer switched off, *Print* reports "Send failed" within about ten seconds, and the editor keeps working.

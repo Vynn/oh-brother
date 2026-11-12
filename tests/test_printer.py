@@ -8,6 +8,7 @@ import tempfile
 import threading
 import unittest
 import warnings
+from unittest import mock
 
 from brother_ql import image_trafos
 from PIL import Image
@@ -15,6 +16,7 @@ from PIL import Image
 import printer
 import render
 import server
+import status
 from . import reference
 from .test_render import RECORD, bar, box, layout, qr, text
 
@@ -122,6 +124,12 @@ class PrintEndpoint(unittest.TestCase):
         self.addCleanup(tmp.cleanup)
         self.printer = FakePrinter()
         self.addCleanup(self.printer.close)
+        # This fake printer gives no status: SNMP goes to a port nothing listens on
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.bind(("127.0.0.1", 0))
+            patch = mock.patch.object(status, "SNMP_PORT", s.getsockname()[1])
+        patch.start()
+        self.addCleanup(patch.stop)
         self.client = server.create_app(os.path.join(tmp.name, "data")).test_client()
 
     def use_printer(self, port):
@@ -144,6 +152,7 @@ class PrintEndpoint(unittest.TestCase):
         self.assertEqual(self.client.post("/api/test", json={}).get_json(),
                          {"ok": False, "message": "No printer address set"})
         self.use_printer(self.printer.port)
-        self.assertEqual(self.client.post("/api/test", json={}).get_json(), {"ok": True, "message": "Printer reachable"})
+        self.assertEqual(self.client.post("/api/test", json={}).get_json(),
+                         {"ok": True, "message": "Printer reachable", "status": None})
         self.use_printer(closed_port())
         self.assertFalse(self.client.post("/api/test", json={}).get_json()["ok"])

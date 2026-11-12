@@ -18,6 +18,7 @@ import fields
 import printer
 import remote
 import render
+import status
 import tables
 import tapes
 
@@ -455,7 +456,38 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
         if not cfg["printer_host"]:
             return jsonify(ok=False, message="No printer address set")
         ok, msg = printer.check(cfg["printer_host"], cfg["printer_port"])
-        return jsonify(ok=ok, message=msg)
+        st = status.read(cfg["printer_host"]) if ok else None
+        if st:
+            msg += " · " + status.summary(st)
+        return jsonify(ok=ok, message=msg, status=st)
+
+    # Whether port 9100 takes a connection, for a printer that gives no status,
+    # remembered for a while: the editor asks for the status every 5 seconds,
+    # and that's too often to keep opening connections to the port jobs go to
+    reach = {"at": None, "ok": None}
+    REACH_FOR_S = 30
+
+    # What the printer says it's doing and what tape it has, for the printer
+    # chip, polled by the editor. `tape`, the layout's tape, adds `mismatch`
+    # when the printer has another loaded. `status` is None when there's no
+    # address, or the printer doesn't say (status.py); `reachable` then says
+    # whether it takes jobs at all.
+    @app.get("/api/status")
+    def printer_status():
+        cfg = load_config()
+        host = cfg["printer_host"]
+        if not host:
+            return jsonify(status=None, summary=None, mismatch=None, reachable=None)
+        st = status.read(host)
+        reachable = None
+        if st is None:
+            key = (host, cfg["printer_port"])
+            if reach["at"] is None or reach["at"][0] != key or time.monotonic() - reach["at"][1] > REACH_FOR_S:
+                reach["ok"], _ = printer.check(host, cfg["printer_port"])
+                reach["at"] = (key, time.monotonic())
+            reachable = reach["ok"]
+        return jsonify(status=st, summary=status.summary(st) if st else None,
+                       mismatch=status.mismatch(request.args.get("tape", ""), st), reachable=reachable)
 
     # ---- rendering & printing ---------------------------------------------
 
@@ -498,6 +530,14 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
         dry_run = bool(b.get("dry_run"))
         if not cfg["printer_host"] and not dry_run:
             return jsonify(error="Set the printer address first"), 400
+        # Before sending, ask the printer what it has loaded and whether it's
+        # in trouble. A reason comes back as 409, and the editor asks before
+        # sending again with "anyway": the reading may be wrong, and a printer
+        # that doesn't say lets the job through as before.
+        if not dry_run and not b.get("anyway"):
+            problem = status.fits(layout.get("tape", "62red"), status.read(cfg["printer_host"]))
+            if problem:
+                return jsonify(error=problem, ask=True), 409
 
         # What's wrong with the layout itself is found here, so it isn't
         # reported as a fault in the first row

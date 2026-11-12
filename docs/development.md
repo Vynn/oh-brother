@@ -6,7 +6,7 @@ The app is plain Python with a plain HTML, CSS and JavaScript front end. The Jav
 
 | Path | Contents | In the repo? |
 |---|---|---|
-| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `status.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
+| `app/` | Server (`main.py`, `server.py`, `render.py`, `tapes.py`, `fields.py`, `barcodes.py`, `printer.py`, `status.py`, `jobs.py`, `tables.py`, `remote.py`), web UI (`static/`), fonts | Yes |
 | `requirements*.txt` | The packages and their checksums: the app's, the build tool's and CI's | Yes |
 | `app/static/` | The editor: `index.html`, `style.css`, and its code in `.mjs` modules | Yes |
 | `tests/` | Server-side tests, with reference images and print jobs in `tests/reference/` | Yes |
@@ -66,6 +66,7 @@ They cover the server side, against a temporary data folder:
 - **Drawing:** every element type and option, the size warnings, and canvas sizes. Thirteen layouts are compared pixel for pixel with reference images in `tests/reference/`. They cover continuous, die-cut, round and black-only tape, across and along, images in every mode, and every barcode type.
 - **Images and barcodes:** image modes, transparency, fitting and the size limits; check digits, lengths, quiet zones, guard and bearer bars for each barcode type.
 - **Images from a web address:** fetched from a small web server on this machine: images, SVG, redirects, pages that aren't images, an entity bomb, missing, oversized, endless and slow downloads, and the address rules.
+- **Print jobs:** the watch that counts labels as they print, on a clock that only moves when it waits, through every way a job can end; jobs taking turns; and `/api/jobs`, drawing, cancelling and printing against the fake printers in fast motion.
 - **Printer status:** decoding the printer's status block in every state seen on a real printer, and every error bit; matching the loaded roll to the tape list; and the question before printing. A fake SNMP agent, a UDP listener on this machine, answers as a QL-820NWB did, and also falls silent, answers another request, or sends damaged replies. The status blocks are built from the layout brother_ql documents.
 - **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer. Other tests check that a job's labels are drawn one at a time, share one date and time, and that an error names its row.
 - **The API:** requests from other sites, the headers every response carries, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
@@ -92,7 +93,8 @@ The editor's code is split by what needs a page and what doesn't. `app.mjs` is t
 | `elements.mjs` | Making a layout safe to edit; removing, reordering and duplicating elements |
 | `history.mjs` | The undo list |
 | `images.mjs` | The sizes an image is tried at |
-| `job.mjs` | What a click on Print sends |
+| `job.mjs` | What a click on Print sends, how the print bar words a print's progress, and a saved PNG's name |
+| `printerstate.mjs` | What the printer chip says |
 
 Their tests are in `tests/editor/`, one `.test.mjs` file for each module, written with a small harness of its own (`harness.mjs`), so nothing is installed. Among other things they build every quick layout on every tape, across and along, and check that nothing lands off the label. They run two ways:
 
@@ -179,6 +181,30 @@ The model, address and the printer's own display text are in the chip's tooltip.
 When the printer has a tape loaded that the layout doesn't suit, the print bar says so beside Print: "**29 × 90 mm labels loaded** · this layout is for 62 mm continuous · black/red". It wraps between its two parts, so it never pushes the Print button out. Printing still asks.
 
 Byte 25 isn't one brother_ql decodes for these tapes. It was `0x81` with black/red tape and `0x01` with black-only die-cut labels, so its top bit is taken to mean two-colour tape. A black-only 62 mm roll would confirm it; until then, a black-only roll could be taken for black/red, or the other way round.
+
+## Print jobs
+
+The editor prints through `POST /api/jobs`, which checks the request as `/api/print` does, asks the question about the tape first, and returns 202 with a job. `jobs.py` runs it on a thread of its own and the editor asks `GET /api/jobs/<id>` every half second until it ends. Jobs reach the printer one at a time, in the order they came; a second one waits as `queued`. Finished jobs are kept for ten minutes, for the editor to read how they ended. `/api/print` still prints in one request, answering once the job is sent; dry runs and the tests use it.
+
+| State | What's happening | `done` counts |
+|---|---|---|
+| `queued` | waiting for another job to finish | |
+| `drawing` | drawn and converted, label by label | labels drawn |
+| `sending` | going to port 9100 | |
+| `printing` | the printer has it; the watch counts its printing phases | labels out |
+| `printed` | every label counted, and the printer idle | |
+| `sent` | the job reached the printer, but the count couldn't be followed | |
+| `failed`, `cancelled` | the reason is in `error` | |
+
+The watch asks the printer every 0.25 s. On the QL-820NWB a label prints for about 2.2 s and there's about 0.9 s between labels, so no phase is missed. A job is `printed` when as many printing phases as labels have come and gone and the printer has been idle for 2.5 s. Anything less certain is `sent`: a printer with no status, no printing seen within 15 s, fewer phases than labels, or nothing changing for a minute. Seen on the QL-820NWB with 3 labels of 62 mm continuous tape, cut on and cut off: one printing phase per label both times (about 1.8 s each with cut off, and about 0.8 s between), and the job ended `printed`, 9.8 s after it started with cut off and 11.3 s with cut on. Not seen on die-cut labels; if their phases don't come one per label, the job ends as `sent`. An error while printing, such as the cover opening, goes in `error` and the watch carries on, for up to ten minutes.
+
+`DELETE /api/jobs/<id>` cancels a job that's queued or being drawn: `Labels` checks between labels and stops. Once it's being sent the answer is 409. A job on its way to the printer can't be called back, and stopping partway would leave a label half printed.
+
+The print bar shows the job as decided in `design/print-bar.html`: the words from `jobWords()` in `job.mjs`, a 2 px line along its top edge, and the Print button turning into Cancel while a cancel works. A second click within half a second is ignored, so a double-click doesn't print and then cancel. Screen readers hear each stage once (`#printSaid`), not every count. "✓ Printed" is in the text colour. The green `.status.ok` uses is 4.1:1, under 4.5:1 for text; it's still used by the template and settings messages.
+
+### Save PNG
+
+`POST /api/png` draws one label as it prints (`keep_missing=False`), so a field the preview keeps as its tag, such as one caught in a loop, is blank, as on paper. The PNG stores 300 dpi (`pHYs`), so another program prints it at its real size, and keeps the label's three colours exactly. The editor saves it with an `a download` link to the image, named by `pngName()`.
 
 ## Launching and stopping
 

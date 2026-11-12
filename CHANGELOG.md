@@ -4,13 +4,16 @@ All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a mi
 
 ## 0.6.0 · unreleased
 
-The printer says what it has loaded and whether it's ready.
+The printer says what it has loaded, whether it's ready, and how far a print has got.
 
 ### Added
 
 - Before printing, the app asks the printer what tape it has and whether anything's wrong. If another tape is loaded, the cover is open or there's no tape, it asks before sending: "The printer has 29 × 90 mm labels loaded; this layout is for 62 mm continuous · black/red. Print anyway?" It used to send the job whatever was loaded, and the printer then stopped with an error. The printer's answer could be wrong, so it only ever asks.
 - The printer chip, top right, says what the printer is doing and what tape it has: "Ready · 62 mm black/red", "Printing", or in red "Cover open", "No tape" or "Not answering". It asks the printer every 5 seconds while the editor is in front. It used to show the printer's model and address, which are now in its tooltip, and a dot set only when the app started or the settings were tested.
 - When the printer has a tape loaded that the layout isn't for, the print bar says so beside Print, before you press it.
+- The print bar follows a print to the end: "Drawing label 120 of 400", "Sending to the printer…", then "Printing 2 of 5" as each label comes out, with a thin line along the bar filling as it goes. It ends with "✓ Printed 5 labels" once the printer has printed them all. It used to stop at "Sent", which meant only that the job had reached the printer. If the printer doesn't show its progress, it still ends with "Sent", and says the printer didn't say when it was done. An error partway, such as the cover opening, shows in the bar, and printing goes on when it's put right.
+- While the labels are being drawn, the Print button becomes Cancel. Once they've been sent, the printer has them and they can't be called back, so the button waits.
+- *Save PNG*, beside Print, saves the label in the preview as it prints, at 300 dpi with that size stored in the file, so it prints at its real size from another program. It's named after the template and the data row, such as `Bin label, row 3.png`.
 - *Test connection* says what the printer reports, such as "Printer reachable · Ready · 62 mm black/red continuous tape" or "Cover open".
 - The app asks over SNMP, which Brother's network printers answer from the factory. Read from a QL-820NWB with 62 mm black/red tape, 29 × 90 mm labels, no tape and the cover open; other tapes, errors and printers aren't tested yet. A printer that doesn't answer prints as before.
 

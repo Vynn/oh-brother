@@ -1238,8 +1238,23 @@ const jobRows = () => job.jobRows(S.data, S.picked);
 const copies = () => job.copiesOf($("#copies").value, S.meta.limits.copies);
 const labelCount = () => job.labelCount(S.data, S.picked, copies());
 
+// A print runs as a job on the server (/api/jobs), which the print bar follows
+// until it ends: drawn, sent, then printed label by label (job.mjs words it).
+// While it can still be cancelled, the Print button cancels it.
+// Study: design/print-bar.html, option A.
+const FOLLOW_MS = 500;
+let printJob = null;      // the job being followed, until it ends
+let printClickAt = 0;     // a double-click on Print mustn't print and then cancel
+
 function drawPrintButton() {
-  const n = labelCount(), b = $("#printBtn");
+  const b = $("#printBtn");
+  $("#pngBtn").disabled = !!printJob;
+  if (printJob) {
+    b.textContent = job.cancellable(printJob) ? "Cancel" : "Printing…";
+    b.disabled = !job.cancellable(printJob);
+    return;
+  }
+  const n = labelCount();
   b.textContent = n === 1 ? "Print 1 label" : `Print ${n} labels`;
   b.disabled = n === 0;
 }
@@ -1247,48 +1262,111 @@ $("#copies").addEventListener("input", drawPrintButton);
 // Once typing is done, the box shows the number that will be used
 $("#copies").addEventListener("change", (ev) => { ev.target.value = copies(); });
 
-// A status line: the print bar's, or the templates' (#tplStatus) or Data panel's (#dataStatus)
+// A status line: the print bar's, or the templates' (#tplStatus) or Data
+// panel's (#dataStatus). cls: "now" (in the text colour), "ok", "err" or none (grey).
 function status(msg, cls = "", where = "#printStatus") {
   const s = $(where);
   if (!s) return;   // an image's line (#imgStatus) is gone once another element is selected
   s.textContent = msg;
-  s.classList.remove("ok", "err");
+  s.classList.remove("ok", "err", "now");
   if (cls) s.classList.add(cls);
 }
 
+// The print bar while a job runs: its words, the line along the bar's top
+// edge (no animation: it moves only when the count does), and the button.
+// A screen reader hears each stage once, not every count (#printSaid).
+let saidStage = "";
+function drawJob(j) {
+  const w = job.jobWords(j), line = $("#printProgress");
+  status(w.text, w.tone);
+  line.hidden = w.share === null;
+  if (w.share !== null) line.firstElementChild.style.width = `${Math.round(w.share * 1000) / 10}%`;
+  if (w.stage !== saidStage) { $("#printSaid").textContent = w.stage; saidStage = w.stage; }
+  drawPrintButton();
+}
+
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function followJob(j) {
+  printJob = j;
+  $("#printStatus").setAttribute("aria-live", "off");   // #printSaid speaks for it meanwhile
+  drawJob(j);
+  try {
+    while (!["printed", "sent", "failed", "cancelled"].includes(printJob.state)) {
+      await pause(FOLLOW_MS);
+      printJob = await api(`/api/jobs/${printJob.id}`);
+      drawJob(printJob);
+    }
+  } catch (e) {   // the app itself went away, or forgot the job
+    status(`Lost track of the print: ${e.message}`, "err");
+  }
+  const ended = printJob;
+  printJob = null; saidStage = "";
+  $("#printStatus").removeAttribute("aria-live");
+  $("#printProgress").hidden = true;
+  drawPrintButton();
+  if (ended.warnings?.length) drawWarnings(ended.warnings);
+  refreshStatus();   // out of labels, perhaps
+}
+
+async function cancelPrint() {
+  try {
+    drawJob(printJob = await api(`/api/jobs/${printJob.id}`, { method: "DELETE" }));
+  } catch (e) {
+    status(e.message, "err");   // sent already: it can't be called back
+  }
+}
+
 $("#printBtn").addEventListener("click", async () => {
+  if (Date.now() - printClickAt < FOLLOW_MS) return;
+  printClickAt = Date.now();
+  if (printJob) { cancelPrint(); return; }
   if (!S.meta.config.printer_host) { openSettings(); return; }
   const n = labelCount();
   if (n > job.CONFIRM_ABOVE && !confirm(`Print ${n} labels?`)) return;   // loading data ticks every row
   const b = $("#printBtn");
   b.disabled = true;
-  status("Sending…");
+  status("Starting…", "now");
   try {
     // rows: each record's row number as the Data table shows it, so the
     // server can name the row a label failed on
     const rows = jobRows();
-    const send = (anyway) => api("/api/print", { method: "POST", body: {
+    const start = (anyway) => api("/api/jobs", { method: "POST", body: {
       layout: S.layout, records: rows ? rows.map((i) => record(S.data.rows[i])) : [record(null)],
       rows: rows?.map((i) => i + 1), chain: chain(), copies: copies(), cut: $("#cut").checked, anyway } });
-    // Before sending, the server asks the printer what it has loaded. A
+    // Before starting, the server asks the printer what it has loaded. A
     // different tape, an open cover or no tape comes back as a question, since
     // the printer's answer may be wrong: one click prints anyway.
     let j;
     try {
-      j = await send(false);
+      j = await start(false);
     } catch (e) {
       if (!e.ask) throw e;
-      if (!confirm(`${e.message}. Print anyway?`)) { status(`Not sent: ${e.message}`, "err"); return; }
-      status("Sending…");
-      j = await send(true);
+      if (!confirm(`${e.message}. Print anyway?`)) { status(`Not sent: ${e.message}`, "err"); drawPrintButton(); return; }
+      j = await start(true);
     }
-    status(`Sent ${j.labels} label${j.labels === 1 ? "" : "s"}` + (j.warnings.length ? ` · ${j.warnings.length} warning(s)` : ""), "ok");
-    refreshStatus();   // printing, perhaps, or out of labels
-    if (j.warnings.length) drawWarnings(j.warnings);
+    followJob(j);
   } catch (e) {
     status(e.message, "err");
-  } finally {
     drawPrintButton();
+  }
+});
+
+// Save PNG: the label in the preview, drawn as it prints, at 300 dpi
+// (/api/png). Named after the template and the data row shown.
+$("#pngBtn").addEventListener("click", async () => {
+  try {
+    const r = await fetch("/api/png", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ layout: S.layout, record: previewRecord(), chain: chain() }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `${r.status} ${r.statusText}`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = h("a", { href: url, download: job.pngName($("#tplName").value, S.data ? S.cur + 1 : null) });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch (e) {
+    status(e.message, "err");
   }
 });
 

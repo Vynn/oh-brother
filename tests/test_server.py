@@ -169,6 +169,38 @@ class Preview(ApiTest):
                 self.assertEqual((resp.status_code, resp.get_json()), (400, {"error": "Expected a layout"}))
 
 
+class SavePng(ApiTest):
+
+    def test_the_label_as_printed(self):
+        lay = layout(TITLE, CODE)
+        resp = self.post("/api/png", {"layout": lay, "record": {"title": "Bolt", "code": "B-1"}})
+        self.assertEqual((resp.status_code, resp.mimetype), (200, "image/png"))
+        from PIL import Image
+        img = Image.open(io.BytesIO(resp.data))
+        self.assertEqual([round(d) for d in img.info["dpi"]], [300, 300])   # prints at its real size elsewhere
+        drawn, _, _ = render.render(lay, {"title": "Bolt", "code": "B-1"}, keep_missing=False)
+        self.assertEqual(img.convert("RGB").tobytes(), drawn.tobytes())
+
+    def test_drawn_as_it_prints_not_as_the_preview(self):
+        # Fields that refer to each other in a loop: the preview keeps their
+        # tags, print leaves them blank, and so does the PNG
+        lay = layout({**TITLE, "text": "{{a}}"})
+        rec = {"a": "{{b}}", "b": "{{a}}"}
+        png = self.post("/api/png", {"layout": lay, "record": rec, "chain": ["a", "b"]}).data
+        from PIL import Image
+        printed, _, _ = render.render(lay, rec, keep_missing=False, chain={"a", "b"})
+        preview, _, _ = render.render(lay, rec, keep_missing=True, chain={"a", "b"})
+        got = Image.open(io.BytesIO(png)).convert("RGB").tobytes()
+        self.assertTrue(got == printed.tobytes(), "the PNG isn't the printed label")
+        self.assertTrue(got != preview.tobytes(), "the PNG is the preview")
+
+    def test_bad_requests(self):
+        self.assertEqual(self.post("/api/png", {"layout": layout(TITLE), "record": [1]}).status_code, 400)
+        resp = self.post("/api/png", {"layout": {"tape": "nope", "elements": []}})
+        self.assertEqual(resp.status_code, 400)
+        self.assertTrue(resp.get_json()["error"].startswith("Rendering failed"))
+
+
 class Print(ApiTest):
 
     def print(self, lay, records, **options):

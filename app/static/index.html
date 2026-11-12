@@ -106,12 +106,16 @@
     </div>
 
     <div class="printbar">
+      <!-- How far a print has got; hidden between prints (drawJob() in app.mjs) -->
+      <span class="print-progress" id="printProgress" hidden><i></i></span>
       <label class="field inline-field">Copies <input type="number" id="copies" min="1" max="100" value="1"></label>
       <label class="check"><input type="checkbox" id="cut" checked> Cut each label</label>
       <span class="spacer"></span>
       <!-- A loaded tape this layout doesn't suit (drawTapeNote() in app.mjs) -->
       <span class="status err tape-note" id="tapeNote" role="status"></span>
       <span class="status" id="printStatus" role="status"></span>
+      <span class="sr-only" id="printSaid" role="status"></span>
+      <button type="button" id="pngBtn" title="The label in the preview, as printed, at 300 dpi">Save PNG</button>
       <button type="button" class="primary" id="printBtn">Print</button>
     </div>
   </section>

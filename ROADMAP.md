@@ -51,6 +51,8 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 
 - [x] The printer's state and loaded tape, read over SNMP, and a question before printing onto another tape, with the cover open or with no tape
 - [x] The printer chip shows the printer's state and tape, and the print bar a tape the layout isn't for (study: `design/printer-status.html`)
+- [x] Print progress, label by label as the printer prints, "Printed" in place of "Sent" when the printer shows it, and Cancel until the labels are sent (study: `design/print-bar.html`)
+- [x] Save the label in the preview as a PNG, as printed, at 300 dpi
 
 ## Under consideration
 
@@ -61,4 +63,3 @@ Not scheduled yet.
 - ARM Linux and macOS tried in real use (CI has built and tested them since 0.3.5)
 - Two-colour images: the black and red parts of one image printed in their own colours
 - More barcodes: UPC-E for small packages, and GS1-128 for shipping labels
-- "Printed" in place of "Sent", and progress for long jobs, if the printer's printing phase can be read during a job

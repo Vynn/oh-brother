@@ -52,6 +52,14 @@ Note anything that fails, with a photo of the label, before releasing.
 - [ ] With no roll in, *Print* asks "No tape. Print anyway?".
 - [ ] With black-only 62 mm tape, *Test connection* says "62 mm continuous tape", without "black/red". Not yet checked: this is the guess about byte 25 in the developer notes.
 
+## Print progress
+
+- [ ] Print 3 labels with *Cut each label* on. The print bar shows "Printing 1 of 3", "2 of 3", "3 of 3", the line along its top fills, and it ends with "✓ Printed 3 labels" a few seconds after the last one is cut.
+- [ ] Print 3 labels with *Cut each label* off. They come out as one strip, the bar counts 1, 2 and 3 of 3 all the same, and ends "✓ Printed 3 labels".
+- [ ] Open the cover partway through a job. The bar says "Cover open · … printed; it goes on once that's put right" in red. Close it: the job goes on and ends "Printed".
+- [ ] Start a long job, 100 copies, and press Cancel while it says "Drawing label …". It says "Cancelled · nothing was sent", and nothing prints.
+- [ ] *Save PNG*, then print the PNG from another program at 100 %: it comes out the size of the label.
+
 ## When the printer can't be reached
 
 - [ ] With the printer switched off, *Print* reports "Send failed" within about ten seconds, and the editor keeps working.

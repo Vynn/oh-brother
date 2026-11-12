@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Study · Print progress and Save as PNG</title>
+<style>
+/* The editor's own tokens (app/static/style.css), copied so this page stands alone */
+:root {
+  --bg: #f4f3f1; --panel: #fbfbfa; --surface: #ffffff; --line: #e2e0dc; --line-strong: #cbc8c2;
+  --text: #1c1b1a; --muted: #6f6c66; --faint: #a19d96; --ink: #141414;
+  --red: #d42b20; --accent: #2f6fdf; --ok: #2f8f4e;
+  --font: system-ui, -apple-system, "Segoe UI", Ubuntu, Cantarell, sans-serif;
+  --mono: ui-monospace, "DejaVu Sans Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 13px/1.45 var(--font); color: var(--text); background: var(--bg); }
+main { max-width: 1040px; margin: 0 auto; padding: 40px 32px 80px; }
+h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 6px; }
+h2 { font-size: 15px; font-weight: 650; margin: 44px 0 4px; }
+h3 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 22px 0 8px; }
+p { margin: 0 0 10px; max-width: 72ch; }
+.lede { font-size: 14px; color: var(--muted); }
+.note { color: var(--muted); }
+code { font-family: var(--mono); font-size: 12px; background: #efede9; padding: 0 3px; border-radius: 3px; }
+.rec { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; background: var(--ink); color: #fff; font-size: 11px; font-weight: 600; vertical-align: 2px; }
+
+/* One print bar per state, as in the editor */
+.states { display: grid; grid-template-columns: 150px 1fr; gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--surface); }
+.states > .what { padding: 0 14px; display: flex; align-items: center; color: var(--muted); font-size: 12px; background: var(--panel); border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
+.states > .bar { border-top: 1px solid var(--line); }
+.states > :nth-child(-n+2) { border-top: 0; }
+.bar { position: relative; display: flex; align-items: center; gap: 16px; padding: 10px 16px; min-height: 56px; background: var(--surface); }
+.bar .spacer { flex: 1; }
+.bar .field { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+.bar input[type=number] { width: 64px; height: 30px; border: 1px solid var(--line); border-radius: 6px; padding: 0 8px; font: inherit; color: var(--text); }
+.bar .check { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn { height: 34px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--line); background: var(--surface); font: inherit; color: var(--text); white-space: nowrap; }
+.btn.primary { padding: 0 22px; border-color: var(--ink); background: var(--ink); color: #fff; font-weight: 600; }
+.btn:disabled { opacity: .45; }
+.btn.quiet { border-color: transparent; background: none; color: var(--muted); padding: 0 6px; text-decoration: underline; height: auto; }
+.msg { font-size: 12px; color: var(--muted); text-align: right; min-width: 0; }
+.msg.now { color: var(--text); }
+.msg.err { color: var(--red); }
+.msg b { font-weight: 600; }
+.msg .n { font-variant-numeric: tabular-nums; }
+/* Progress: a 2 px line along the bar's top edge, filled to the share done. It
+   moves only when the count does; nothing is animated. */
+.track { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--line); }
+.track i { display: block; height: 100%; background: var(--ink); }
+
+table.facts { border-collapse: collapse; margin: 8px 0 0; font-size: 12px; }
+table.facts th, table.facts td { text-align: left; padding: 5px 14px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.facts th { color: var(--muted); font-weight: 600; }
+.sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -2px; margin-right: 6px; border: 1px solid rgba(0,0,0,.08); }
+ol.decide { padding-left: 20px; } ol.decide li { margin: 0 0 8px; max-width: 75ch; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Print progress and Save as PNG</h1>
+<p class="lede">Study for review items 21 and 22. A print now runs as a job the editor can follow: drawn, sent, then watched label by label as the printer prints. This page shows how the print bar could show that, where Cancel goes, and where a Save as PNG button could sit.</p>
+<p><strong>Decided, 2026-11-12, and built:</strong> A, words with a thin line along the bar, and Print turning into Cancel while a cancel still works; S1, a Save PNG button beside Print; and "Printed" in the text colour with a ✓, not the green that's too light for text. Built as shown, except that the bar names the next label, "Drawing label 121 of 400", while it's being drawn.</p>
+
+<h3>What the editor can know</h3>
+<table class="facts">
+  <tr><th>Stage</th><th>What's counted</th><th>Can it be cancelled?</th></tr>
+  <tr><td>Drawing</td><td>labels drawn and converted, by the app itself: exact</td><td>yes; nothing has been sent</td></tr>
+  <tr><td>Sending</td><td>nothing to count; brief, except for very long jobs</td><td>no</td></tr>
+  <tr><td>Printing</td><td>labels as they come out, from the printer's printing phases: seen with 3 labels, cut on and cut off</td><td>no: the printer has the job</td></tr>
+  <tr><td>Printed</td><td>every label counted, and the printer idle</td><td>—</td></tr>
+  <tr><td>Sent</td><td>the job reached the printer, but the count couldn't be followed: no status, or fewer phases than labels</td><td>—</td></tr>
+</table>
+
+<!-- ======================================================================= -->
+<h2>A · Words, a thin line, and Print turns into Cancel <span class="rec">recommended</span></h2>
+<p>The status line says where the job is, in the words of the table above. A 2 px line along the top of the print bar fills as labels are drawn, then again as they print. While Cancel can still stop the job, the Print button becomes Cancel; once it can't, it waits, disabled, until the job is over.</p>
+<div class="states">
+  <div class="what">Ready</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><button class="btn" type="button">Save PNG</button><button class="btn primary" type="button">Print 400 labels</button></div>
+
+  <div class="what">Drawing</div>
+  <div class="bar"><span class="track"><i style="width:30%"></i></span><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now" role="status">Drawing label <span class="n">120</span> of <span class="n">400</span></span><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button">Cancel</button></div>
+
+  <div class="what">Sending</div>
+  <div class="bar"><span class="track"><i style="width:100%"></i></span><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now">Sending to the printer…</span><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button" disabled>Printing…</button></div>
+
+  <div class="what">Printing</div>
+  <div class="bar"><span class="track"><i style="width:40%"></i></span><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now">Printing <span class="n">2</span> of <span class="n">5</span></span><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button" disabled>Printing…</button></div>
+
+  <div class="what">Stopped</div>
+  <div class="bar"><span class="track"><i style="width:40%"></i></span><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg err"><b>Cover open</b> · 2 of 5 printed; it goes on once it's closed</span><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button" disabled>Printing…</button></div>
+
+  <div class="what">Printed</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now">✓ Printed <span class="n">5</span> labels</span><button class="btn" type="button">Save PNG</button><button class="btn primary" type="button">Print 5 labels</button></div>
+
+  <div class="what">Sent</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg">Sent <span class="n">5</span> labels · the printer didn't say when they were done</span><button class="btn" type="button">Save PNG</button><button class="btn primary" type="button">Print 5 labels</button></div>
+
+  <div class="what">Cancelled</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg">Cancelled · nothing was sent</span><button class="btn" type="button">Save PNG</button><button class="btn primary" type="button">Print 400 labels</button></div>
+
+  <div class="what">Failed</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg err">Rendering failed on row 4: the QR code can't hold this much data</span><button class="btn" type="button">Save PNG</button><button class="btn primary" type="button">Print 5 labels</button></div>
+</div>
+<p class="note" style="margin-top:8px"><strong>For:</strong> one place to look, and Cancel is where your pointer already is. <strong>Against:</strong> the Print button changes its job, so a double-click on Print could cancel; the editor would ignore a second click within half a second.</p>
+
+<!-- ======================================================================= -->
+<h2>B · Words only, with a separate Cancel</h2>
+<p>No line. A small Cancel link sits beside the words while it can act, and Print stays Print, disabled.</p>
+<div class="states">
+  <div class="what">Drawing</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now">Drawing label <span class="n">120</span> of <span class="n">400</span></span><button class="btn quiet" type="button">Cancel</button><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button" disabled>Print 400 labels</button></div>
+  <div class="what">Printing</div>
+  <div class="bar"><label class="field">Copies <input type="number" value="1"></label><label class="check"><input type="checkbox" checked> Cut each label</label><span class="spacer"></span><span class="msg now">Printing <span class="n">2</span> of <span class="n">5</span></span><button class="btn" type="button" disabled>Save PNG</button><button class="btn primary" type="button" disabled>Print 5 labels</button></div>
+</div>
+<p class="note" style="margin-top:8px"><strong>For:</strong> Print never means anything else. <strong>Against:</strong> a small target for the one thing you'd want quickly, and a long job's progress is a number you have to read.</p>
+
+<!-- ======================================================================= -->
+<h2>Save as PNG</h2>
+<h3>S1 · A button beside Print <span class="rec">recommended</span></h3>
+<p>Shown in the bars above: a plain button, the same height as Print, never filled. It saves the label in the preview, as printed: the row shown in the preview, without the editor's hatching for empty codes, at 300 dpi with that size stored in the file, so it prints at its real size from another program. The file is named after the template and the row, such as <code>Bin label, row 3.png</code>, or <code>label.png</code> with no template name.</p>
+<h3>S2 · In the Templates panel</h3>
+<p class="note">Beside Save, as "Export…". Out of the way, but it's a picture of one label, not of the template, so it'd sit oddly there.</p>
+
+<!-- ======================================================================= -->
+<h2>Colour and contrast</h2>
+<table class="facts">
+  <tr><th>Colour</th><th>Role</th><th>On white</th></tr>
+  <tr><td><span class="sw" style="background:#1c1b1a"></span><code>#1c1b1a</code> text</td><td>a job in progress, and "✓ Printed"</td><td>17.2 : 1</td></tr>
+  <tr><td><span class="sw" style="background:#6f6c66"></span><code>#6f6c66</code> muted</td><td>sent, cancelled</td><td>5.2 : 1</td></tr>
+  <tr><td><span class="sw" style="background:#d42b20"></span><code>#d42b20</code> label red</td><td>stopped and failed, as the printer chip's trouble</td><td>5.0 : 1</td></tr>
+  <tr><td><span class="sw" style="background:#141414"></span><code>#141414</code> ink</td><td>the progress line, on <code>#e2e0dc</code></td><td>a line, not text</td></tr>
+  <tr><td><span class="sw" style="background:#2f8f4e"></span><code>#2f8f4e</code> ok</td><td>not used here</td><td>4.1 : 1, too light for text</td></tr>
+</table>
+<p class="note" style="margin-top:10px">Found while making this study: the editor already writes "Sent 3 labels" in the green <code>#2f8f4e</code>, at 4.1 : 1, under the 4.5 : 1 you set for text. These bars use the text colour and a ✓ instead, which would fix that too.</p>
+
+<h2>To decide</h2>
+<ol class="decide">
+  <li>Progress: <strong>A</strong> (words, a thin line, Print turns into Cancel) or B (words only, a separate Cancel).</li>
+  <li>Save as PNG: <strong>S1</strong>, a button beside Print, or S2, in the Templates panel.</li>
+  <li>"Printed" and "Sent" in the text colour with a ✓, in place of the green that's too light: <strong>yes</strong> or no.</li>
+</ol>
+
+</main>
+</body>
+</html>

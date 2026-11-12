@@ -265,10 +265,20 @@ table { border-collapse: collapse; }
 }
 .inline-field { flex-direction: row; align-items: center; gap: 8px; margin: 0; }
 .inline-field input { width: 64px; }
-.printbar .primary { height: 34px; padding: 0 22px; white-space: nowrap; }
+.printbar { position: relative; }
+.printbar .primary, #pngBtn { height: 34px; white-space: nowrap; }
+.printbar .primary { padding: 0 22px; }
+/* How far a print has got: 2 px along the bar's top edge, filled to the
+   share done. It moves only when the count does; nothing is animated. */
+.print-progress { position: absolute; left: 0; right: 0; top: -1px; height: 2px; background: var(--line); }
+.print-progress i { display: block; height: 100%; width: 0; background: var(--ink); }
+.print-progress[hidden] { display: none; }
 .printbar .check, .printbar .status { white-space: nowrap; }
 .status { color: var(--muted); font-size: 12px; margin: 0; }
 .status.ok { color: var(--ok); }
+/* A print in progress, or printed: the text colour, with a ✓ in the words.
+   The green above is 4.1:1, too light for text (design/print-bar.html). */
+.status.now { color: var(--text); }
 .status.err { color: var(--red); }
 /* Template, data and image messages take no room until there is one */
 .tpl-status:empty, .data-status:empty, .img-status:empty, .tape-note:empty { display: none; }

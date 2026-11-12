@@ -15,6 +15,7 @@ from werkzeug.exceptions import HTTPException, InternalServerError
 
 import barcodes
 import fields
+import jobs
 import printer
 import remote
 import render
@@ -193,6 +194,9 @@ class Labels:
         self.layout, self.records, self.copies = layout, records, copies
         self.chain, self.now, self.rows = chain, now, rows
         self.warnings, self.blanks = [], []
+        # Called with the number of labels handed over so far, after each one:
+        # a background job counts them, and stops here when it's cancelled
+        self.progress = None
 
     def __len__(self):
         return len(self.records) * self.copies
@@ -210,8 +214,10 @@ class Labels:
                 raise RowError(f"Rendering failed{self.where(n)}: {reason(e)}") from e
             self.warnings += [x for x in w if x not in self.warnings]
             self.blanks.append(blank)
-            for _ in range(self.copies):
+            for c in range(self.copies):
                 yield img
+                if self.progress:
+                    self.progress(n * self.copies + c + 1)
 
 
 BLANK_NAMES = {"qr": "QR code", "barcode": "Barcode", "image": "Image"}
@@ -510,14 +516,17 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
             "X-Blank": quote(json.dumps(blank)),
         })
 
-    @app.post("/api/print")
-    def print_labels():
-        b = body()
+    def prepare(b):
+        """A print request checked: (its parts, None), or (None, an error response).
+
+        Shared by /api/print, which prints and answers when the job is sent,
+        and /api/jobs, which prints in the background and reports progress.
+        """
         cfg = load_config()
         layout = layout_of(b)
         records = b.get("records") or [{}]
         if not isinstance(records, list) or not all(isinstance(r, dict) for r in records):
-            return jsonify(error="Records must be a list of objects"), 400
+            return None, (jsonify(error="Records must be a list of objects"), 400)
         # The records' row numbers in the data file, when the editor sends them
         rows = b.get("rows")
         if not isinstance(rows, list) or len(rows) != len(records):
@@ -526,10 +535,10 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
         try:
             copies = max(1, min(MAX_COPIES, int(b.get("copies", 1))))
         except (TypeError, ValueError):
-            return jsonify(error="Copies must be a whole number"), 400
+            return None, (jsonify(error="Copies must be a whole number"), 400)
         dry_run = bool(b.get("dry_run"))
         if not cfg["printer_host"] and not dry_run:
-            return jsonify(error="Set the printer address first"), 400
+            return None, (jsonify(error="Set the printer address first"), 400)
         # Before sending, ask the printer what it has loaded and whether it's
         # in trouble. A reason comes back as 409, and the editor asks before
         # sending again with "anyway": the reading may be wrong, and a printer
@@ -537,31 +546,121 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
         if not dry_run and not b.get("anyway"):
             problem = status.fits(layout.get("tape", "62red"), status.read(cfg["printer_host"]))
             if problem:
-                return jsonify(error=problem, ask=True), 409
-
+                return None, (jsonify(error=problem, ask=True), 409)
         # What's wrong with the layout itself is found here, so it isn't
         # reported as a fault in the first row
         try:
             tapes.canvas_dots(layout)
         except Exception as e:
-            return jsonify(error=f"Rendering failed: {reason(e)}"), 400
+            return None, (jsonify(error=f"Rendering failed: {reason(e)}"), 400)
         # One date and time for the whole job. Each label is drawn as the
         # conversion reaches it, and the job is sent only once all are done,
         # so an error in any row still prints nothing.
         labels = Labels(layout, records, copies, chain, datetime.datetime.now(), rows)
+        return {"cfg": cfg, "layout": layout, "labels": labels, "copies": copies,
+                "cut": b.get("cut", True), "dry_run": dry_run}, None
+
+    def convert(p):
+        """The raster job for prepared parts: (bytes, warnings). Raises RowError
+        with the message for the user, or jobs.Cancelled from a cancelled job."""
         try:
-            job = printer.build_job(layout, labels, cfg["model"], cut=b.get("cut", True))
+            data = printer.build_job(p["layout"], p["labels"], p["cfg"]["model"], cut=p["cut"])
+        except (RowError, jobs.Cancelled):
+            raise
+        except Exception as e:
+            raise RowError(f"Conversion failed: {reason(e)}") from e
+        return data, p["labels"].warnings + blank_code_warnings(p["labels"].blanks, p["copies"])
+
+    # One label as a PNG, to save: drawn as it prints, so a field the preview
+    # keeps as its tag (one caught in a loop) is blank, and at 300 dpi with
+    # that stored in the file, so another program prints it at its real size. The colours are the label's own, black, red
+    # and white, and PNG keeps them exactly.
+    @app.post("/api/png")
+    def save_png():
+        b = body()
+        layout, record = layout_of(b), b.get("record")
+        if record is not None and not isinstance(record, dict):
+            abort(400, "Expected a record")
+        try:
+            img, _, _ = render.render(layout, record, keep_missing=False, chain=set(b.get("chain") or ()))
+        except Exception as e:
+            return jsonify(error=f"Rendering failed: {reason(e)}"), 400
+        buf = io.BytesIO()
+        img.save(buf, "PNG", dpi=(tapes.DPI, tapes.DPI), optimize=True)
+        return Response(buf.getvalue(), mimetype="image/png", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/print")
+    def print_labels():
+        p, err = prepare(body())
+        if err:
+            return err
+        try:
+            data, warnings = convert(p)
         except RowError as e:
             return jsonify(error=str(e)), 400
-        except Exception as e:
-            return jsonify(error=f"Conversion failed: {reason(e)}"), 400
-        warnings = labels.warnings + blank_code_warnings(labels.blanks, copies)
-        if not dry_run:
+        if not p["dry_run"]:
             try:
-                printer.send(cfg["printer_host"], cfg["printer_port"], job)
+                printer.send(p["cfg"]["printer_host"], p["cfg"]["printer_port"], data)
             except OSError as e:
                 return jsonify(error=f"Send failed: {e}"), 502
-        return jsonify(labels=len(labels), bytes=len(job), warnings=warnings, dry_run=dry_run)
+        return jsonify(labels=len(p["labels"]), bytes=len(data), warnings=warnings, dry_run=p["dry_run"])
+
+    # ---- print jobs in the background, with progress (jobs.py) --------------
+
+    app.jobs = runner = jobs.Runner()
+
+    @app.post("/api/jobs")
+    def start_job():
+        b = body()
+        if b.get("dry_run"):
+            return jsonify(error="A dry run prints nothing: use /api/print"), 400
+        p, err = prepare(b)
+        if err:
+            return err
+        host, port = p["cfg"]["printer_host"], p["cfg"]["printer_port"]
+        job = jobs.Job(len(p["labels"]))
+
+        def work(job):
+            job.state = "drawing"
+
+            def drew(n):
+                job.done = n
+                job.check()   # a cancelled job stops between labels
+
+            p["labels"].progress = drew
+            try:
+                data, job.warnings = convert(p)
+            except RowError as e:
+                return job.finish("failed", str(e))
+            job.bytes = len(data)
+            job.check()
+            # Sent, it can't be called back: from here on, cancel is refused
+            job.state = "sending"
+            try:
+                printer.send(host, port, data)
+            except OSError as e:
+                return job.finish("failed", f"Send failed: {e}")
+            jobs.watch(job, lambda: status.read(host))
+
+        runner.start(job, work)
+        return jsonify(job.to_json()), 202
+
+    def job_of(job_id):
+        job = runner.get(job_id)
+        if job is None:
+            abort(404, "No print job by that id")
+        return job
+
+    @app.get("/api/jobs/<job_id>")
+    def job_progress(job_id):
+        return jsonify(job_of(job_id).to_json())
+
+    @app.delete("/api/jobs/<job_id>")
+    def cancel_job(job_id):
+        job = job_of(job_id)
+        if not job.cancel():
+            abort(409, "The labels have been sent to the printer and can't be called back")
+        return jsonify(job.to_json())
 
     # ---- images from a web address ------------------------------------------
 

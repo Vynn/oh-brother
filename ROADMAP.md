@@ -47,7 +47,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Every download the build makes checked against a checksum, and a build that fails leaves the last one working
 - [x] A policy for what the editor's page may load, requests from other sites refused, and a limit on the size of a data file
 
-## 0.6 · Printer status · not released
+## 0.6 · Printer status · released
 
 - [x] The printer's state and loaded tape, read over SNMP, and a question before printing onto another tape, with the cover open or with no tape
 - [x] The printer chip shows the printer's state and tape, and the print bar a tape the layout isn't for (study: `design/printer-status.html`)

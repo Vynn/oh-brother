@@ -2,7 +2,7 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
-## 0.6.0 · unreleased
+## 0.6.0 · 2026-11-12
 
 The printer says what it has loaded, whether it's ready, and how far a print has got.
 

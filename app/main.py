@@ -14,7 +14,7 @@ import threading
 import time
 import webbrowser
 
-VERSION = "0.5.0"
+VERSION = "0.6.0"
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(APP_DIR)

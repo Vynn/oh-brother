@@ -17,6 +17,10 @@ The printer says what it has loaded, whether it's ready, and how far a print has
 - *Test connection* says what the printer reports, such as "Printer reachable · Ready · 62 mm black/red continuous tape" or "Cover open".
 - The app asks over SNMP, which Brother's network printers answer from the factory. Read from a QL-820NWB with 62 mm black/red tape, 29 × 90 mm labels, no tape and the cover open; other tapes, errors and printers aren't tested yet. A printer that doesn't answer prints as before.
 
+### Changed
+
+- The README's screenshots are retaken, with the new printer chip and the Save PNG button.
+
 ## 0.5.0 · 2026-11-11
 
 The editor from the keyboard, tests for its code, and checked downloads.

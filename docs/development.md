@@ -311,8 +311,19 @@ To retake them:
 
 1. Start a separate instance with its own port and data folder, such as `sh run.sh --no-browser --port 8630 --data <folder>`, and give it the printer address `192.168.1.50`. `.claude/launch.json` has one as `oh-brother-demo`.
 2. Set the browser pane's viewport to 1200 × 720, so the three columns and the data rows fit.
-3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`; two elements mid-drag, with a snap guide and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* with a plain star as its image. No printer answers at the placeholder address, so the printer chip is set to a ready printer from the page with `ohBrother.drawPrinterChip({status: {state: "ready", errors: [], tape: {kind: "continuous", width_mm: 62, length_mm: 0, two_colour: true}}})`. It shows "Ready · 62 mm black/red", until the next check puts it back, five seconds later; the images in the README were taken before 0.6 and still show the old chip.
-4. Capture the whole pane as a PNG, 800 × 480, into `docs/images/`, and check each image for private details before committing.
+3. Set up each scene. The current images show *Sample: Bin label* previewing row 3 of `samples/parts.csv`, with rows 1 to 3 ticked; the *{{size}}* text and the QR code being dragged together, their bottom edge snapped to the barcode's with a guide, and the chained field `INS-{{size}}-5`; and the *Layered shelf tag* on 25 mm of continuous tape, with a plain star SVG as its image and the *Retail* layouts open. No printer answers at the placeholder address, so the printer chip is shown a ready printer by answering its checks from the page, in the browser's console:
+
+   ```js
+   const real = fetch;
+   fetch = async (url, o) => String(url).includes("/api/status")
+     ? new Response(JSON.stringify({ status: { state: "ready", errors: [], display: "READY", tape: { kind: "continuous",
+         width_mm: 62, length_mm: 0, two_colour: true, name: "Continuous length tape", matches: ["62red"] } },
+         summary: "Ready", mismatch: null, reachable: null }), { headers: { "Content-Type": "application/json" } })
+     : real(url, o);
+   ```
+
+   Within five seconds the chip says "Ready · 62 mm black/red", and stays so until the page is reloaded.
+4. Capture the whole pane as a PNG, 800 × 479, into `docs/images/`, and check each image for private details before committing.
 
 ## Commits
 

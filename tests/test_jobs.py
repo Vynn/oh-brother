@@ -183,19 +183,25 @@ class Api(unittest.TestCase):
             patch = mock.patch.object(status, name, value)
             patch.start()
             self.addCleanup(patch.stop)
-        # A watch in fast motion: phases of a tenth of a second
-        for name, value in (("POLL_S", 0.02), ("IDLE_DONE_S", 0.3), ("FIRST_PHASE_S", 1.5)):
+        # A watch in fast motion. The waits are generous: CI's macOS runners are
+        # slow enough that tighter ones failed there
+        for name, value in (("POLL_S", 0.02), ("IDLE_DONE_S", 0.4), ("FIRST_PHASE_S", 5)):
             patch = mock.patch.object(jobs, name, value)
             patch.start()
             self.addCleanup(patch.stop)
-        self.client = server.create_app(os.path.join(tmp.name, "data")).test_client()
+        self.app = server.create_app(os.path.join(tmp.name, "data"))
+        self.client = self.app.test_client()
         self.client.post("/api/config", json={"printer_host": "127.0.0.1", "printer_port": self.printer.port})
 
-    def play(self, labels, phase_s=0.1, gap_s=0.05):
-        """Once a job reaches the fake printer, its status shows `labels`
-        printing phases, as the real one did."""
+    def play(self, labels, phase_s=0.3, gap_s=0.15):
+        """Once a job reaches the fake printer and is being watched, its status
+        shows `labels` printing phases, as the real one did. Waiting for the
+        watch keeps the test from racing it on a slow machine."""
         def run():
             self.printer.jobs.get(timeout=10)
+            end = time.monotonic() + 10
+            while time.monotonic() < end and not any(j.state == "printing" for j in list(self.app.jobs.jobs.values())):
+                time.sleep(0.005)
             for _ in range(labels):
                 self.agent.values[status.STATUS_OID] = PRINTING
                 time.sleep(phase_s)
@@ -232,18 +238,21 @@ class Api(unittest.TestCase):
 
     def test_drawing_is_counted_and_can_be_cancelled(self):
         def slow_render(*a, **kw):
-            time.sleep(0.05)
+            time.sleep(0.1)
             return real(*a, **kw)
         real = render.render
         with mock.patch.object(render, "render", slow_render):
-            job_id = self.start(records=RECORDS * 20).get_json()["id"]   # 40 labels
-            j, _ = self.follow(job_id, until=("drawing",))
-            time.sleep(0.2)
-            self.assertGreater(self.client.get(f"/api/jobs/{job_id}").get_json()["done"], 0)
+            job_id = self.start(records=RECORDS * 30).get_json()["id"]   # 60 labels, 6 s at the least
+            # Wait for labels to be counted, however slow the machine, then cancel
+            end, done = time.monotonic() + 5, 0
+            while time.monotonic() < end and not done:
+                done = self.client.get(f"/api/jobs/{job_id}").get_json()["done"]
+                time.sleep(0.02)
+            self.assertGreater(done, 0)
             self.assertEqual(self.client.delete(f"/api/jobs/{job_id}").status_code, 200)
             j, _ = self.follow(job_id)
         self.assertEqual(j["state"], "cancelled")
-        self.assertLess(j["done"], 40)
+        self.assertLess(j["done"], 60)
         time.sleep(0.2)
         self.assertTrue(self.printer.jobs.empty())   # nothing was sent
 

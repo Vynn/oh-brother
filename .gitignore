@@ -10,6 +10,8 @@ private/
 
 # Local Claude app settings (not part of the project)
 .claude/
+# Project notes for Claude, such as the release-title theme: kept on this machine
+/CLAUDE.md
 
 __pycache__/
 *.pyc

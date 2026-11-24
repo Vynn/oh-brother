@@ -163,6 +163,9 @@ def main():
         ip = lan_address()
         print(f"Other devices: http://{ip}:{port}/" if ip
               else f"Other devices: this machine's network address, port {port}")
+    # Out now, not when Python's buffer fills: output sent to a pipe or a log is
+    # held back, and lost if the app is stopped outright, as Windows' tests do
+    sys.stdout.flush()
     if not args.no_browser:
         threading.Timer(0.8, open_browser, [url]).start()
     if auto_stop:

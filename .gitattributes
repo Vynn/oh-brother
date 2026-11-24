@@ -1,0 +1,8 @@
+# Text files keep LF line endings on every system. Git on Windows is often set
+# to switch them to CRLF on checkout, as on GitHub's Windows runners, and the
+# shell scripts then fail in Git Bash.
+* text=auto eol=lf
+
+# Except batch files: the Command Prompt needs CRLF. Git keeps them as LF in
+# the repository and writes CRLF when checking them out, on any system.
+*.bat text eol=crlf

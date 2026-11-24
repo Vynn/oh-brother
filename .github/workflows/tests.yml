@@ -32,8 +32,13 @@ jobs:
           - { name: Linux ARM, os: ubuntu-24.04-arm }
           - { name: macOS Apple Silicon, os: macos-15 }
           - { name: macOS Intel, os: macos-15-intel }
+          - { name: Windows x86_64, os: windows-2025 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
+    # The same scripts everywhere: on Windows, bash is the runner's Git Bash
+    defaults:
+      run:
+        shell: bash
     steps:
       # GitHub's own actions, pinned to the commit of a release
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1

@@ -7,8 +7,10 @@
 #         sh build.sh macos-arm64 ... # add runtimes for other platforms
 #         sh build.sh --newest        # the newest packages, not the pinned ones
 #
-# Platforms: linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64
-# Only the host platform is tested; others are downloaded the same way.
+# Platforms: linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64 windows-x86_64
+# Only the host platform is tested; others are downloaded the same way, so a
+# folder built here can carry Windows too. On Windows itself it runs in Git
+# Bash, as in CI.
 #
 # Everything downloaded is checked against a SHA-256 kept in this repository:
 # the runtime's below, each package's in the requirements files. A download
@@ -40,6 +42,7 @@ host_platform() {
         Linux-aarch64|Linux-arm64)  echo linux-aarch64 ;;
         Darwin-arm64)               echo macos-arm64 ;;
         Darwin-x86_64)              echo macos-x86_64 ;;
+        MINGW*-x86_64|MSYS*-x86_64) echo windows-x86_64 ;;   # Git Bash on Windows
         *) echo "unsupported host: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
     esac
 }
@@ -51,6 +54,7 @@ pbs_triple() {
         linux-aarch64) echo aarch64-unknown-linux-gnu ;;
         macos-arm64)   echo aarch64-apple-darwin ;;
         macos-x86_64)  echo x86_64-apple-darwin ;;
+        windows-x86_64) echo x86_64-pc-windows-msvc ;;
         *) echo "unknown platform: $1" >&2; exit 1 ;;
     esac
 }
@@ -63,6 +67,17 @@ pbs_sha256() {
         linux-aarch64) echo 578d9da1983463ffb0c8c98ab0da2f18177f44069328eb0af847860c1eb05c3e ;;
         macos-arm64)   echo 8392b6ea51d94391befb2c31ebe75463f045d0b69dfcf5e1bb3234e1f5fa3405 ;;
         macos-x86_64)  echo 7412c19d896c99431b74a18a5643e110449a7f9590fbab179c3e5ab27b9aa9e3 ;;
+        windows-x86_64) echo 7369f7a35f261222a6ac8b3a87c1c88eeebee8af945d85346202591a64038dd3 ;;
+    esac
+}
+
+# platform -> its Python, inside runtime/<platform>. The Windows runtime keeps
+# python.exe at the top, beside the DLLs it needs, Microsoft's C runtime
+# included, so nothing has to be installed there either.
+py_path() {
+    case "$1" in
+        windows-*) echo python/python.exe ;;
+        *)         echo python/bin/python3 ;;
     esac
 }
 
@@ -82,13 +97,14 @@ pip_tags() {
         linux-aarch64) echo "manylinux_2_28_aarch64 manylinux2014_aarch64" ;;
         macos-arm64)   echo "macosx_11_0_arm64" ;;
         macos-x86_64)  echo "macosx_10_13_x86_64" ;;
+        windows-x86_64) echo "win_amd64" ;;
     esac
 }
 
 fetch_runtime() {
     plat=$1
     dest="$HERE/runtime/$plat"
-    if [ -x "$dest/python/bin/python3" ] && [ "$(cat "$dest/STAMP" 2>/dev/null)" = "$PBS_TAG-$PY_VER" ]; then
+    if [ -x "$dest/$(py_path "$plat")" ] && [ "$(cat "$dest/STAMP" 2>/dev/null)" = "$PBS_TAG-$PY_VER" ]; then
         echo "runtime/$plat: up to date"
         return
     fi
@@ -137,7 +153,7 @@ HOST=$(host_platform)
 TARGETS=${*:-$HOST}
 # The host runtime is always needed: its pip installs packages for every target.
 fetch_runtime "$HOST"
-HOSTPY="$HERE/runtime/$HOST/python/bin/python3"
+HOSTPY="$HERE/runtime/$HOST/$(py_path "$HOST")"
 
 # The requirements files as they are, or for --newest, copies with the
 # versions and checksums taken out

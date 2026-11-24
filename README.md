@@ -11,6 +11,7 @@ Label printing for a network Brother QL-820NWB, in black or in black and red. It
 - A Brother QL-820NWB on the network. Other two-colour QL models (QL-800, QL-810W) are selectable but untested.
 - For red: DK-2251 tape (62 mm, black and red), also sold as the DK-22513 3-pack.
 - Linux on x86_64. Builds for ARM Linux and macOS pass the tests on every change, but haven't been tried in real use: see the [roadmap](ROADMAP.md).
+- Windows 10 or 11 on x86_64 is new in 0.7 and hasn't been tried with a printer yet: see [Windows](#windows).
 
 ## Run
 
@@ -89,6 +90,19 @@ The preview is exactly what prints. If the printer has a tape loaded that the la
 
 - Start the app with `sh run.sh` rather than `./run.sh`, since FAT32 and exFAT don't keep the executable flag.
 - If the drive doesn't allow running programs, the Python runtime (about 110 MB) is copied once to `~/.cache/oh-brother/`. Your settings and templates stay on the drive.
+- One folder can carry several systems: name each when building, such as `sh build.sh linux-x86_64 windows-x86_64`.
+
+## Windows
+
+Windows 10 or 11 on x86_64. Windows 11 on ARM should run it through its x64 emulation, untested. The tests run on Windows on every change, but it hasn't been tried with a printer yet.
+
+1. On Linux or macOS, add Windows to the folder: `sh build.sh windows-x86_64`.
+2. Copy the folder to a thumbdrive, or to the PC, for example into Documents. Not into Program Files: the app keeps your templates and settings in its own `data` folder.
+3. Double-click `run.bat`. A Command Prompt window opens and stays while the app runs, and the editor opens in your default browser.
+
+- The app stops by itself about 10 seconds after you close its browser window, and the Command Prompt window closes with it. Ctrl+C in that window stops it too; Windows may then ask "Terminate batch job (Y/N)?", and either answer closes it.
+- Options go after the name, in a Command Prompt: `run.bat --lan`. With `--lan`, Windows Firewall may ask whether Python may accept connections: allow it on private networks only.
+- If Windows won't run programs from the thumbdrive, `run.bat` says so: copy the folder to the PC and start it there. It doesn't copy its Python elsewhere to get round that, as on Linux, since on Windows that's usually a rule set by whoever looks after the PC.
 
 ## Development
 

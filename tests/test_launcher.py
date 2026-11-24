@@ -1,5 +1,5 @@
 """The launcher: main.py's helpers for the browser and the port, and run.sh
-started as a user starts it."""
+(run.bat on Windows) started as a user starts it."""
 
 import json
 import os
@@ -15,7 +15,12 @@ from unittest import mock
 import main
 from . import ROOT
 
+WINDOWS = os.name == "nt"
 
+
+# default_browser_cmd() is only used on Linux, and the XDG_DATA_DIRS it reads
+# is split at colons, which Windows paths have after the drive letter
+@unittest.skipIf(WINDOWS, "Linux's browser lookup; Windows uses webbrowser")
 class BrowserCommand(unittest.TestCase):
 
     def command(self, exec_line, desktop="firefox.desktop"):
@@ -74,16 +79,29 @@ class Ports(unittest.TestCase):
 
 
 class Startup(unittest.TestCase):
-    """sh run.sh, on a free port with a temporary data folder."""
+    """sh run.sh, or run.bat on Windows, on a free port with a temporary data folder."""
+
+    @staticmethod
+    def stop(proc):
+        """End the launcher and the app it started, if still running."""
+        if proc.poll() is not None:
+            return
+        if WINDOWS:
+            # The Command Prompt runs Python as its child, which killing the
+            # Command Prompt alone would leave running
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+        else:
+            proc.kill()
 
     def test_starts_answers_and_stops_with_ctrl_c(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         data = os.path.join(tmp.name, "data")
         port = main.free_port(8700, "127.0.0.1")
-        proc = subprocess.Popen(["sh", os.path.join(ROOT, "run.sh"), "--no-browser", "--port", str(port),
-                                 "--data", data], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        self.addCleanup(proc.kill)   # in case a check below fails first
+        launcher = ["cmd", "/c", os.path.join(ROOT, "run.bat")] if WINDOWS else ["sh", os.path.join(ROOT, "run.sh")]
+        proc = subprocess.Popen([*launcher, "--no-browser", "--port", str(port), "--data", data],
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.addCleanup(self.stop, proc)   # in case a check below fails first
         # Straight to this machine, whatever proxy the environment names
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
         deadline = time.monotonic() + 20
@@ -97,8 +115,14 @@ class Startup(unittest.TestCase):
                     self.fail("The app didn't start: " + (proc.communicate(timeout=5)[0] if proc.poll() is not None else "timed out"))
                 time.sleep(0.1)
         self.assertIn("QL-820NWB", meta["models"])
-        proc.send_signal(signal.SIGINT)   # Ctrl+C; run.sh has exec'd Python, so it gets it directly
-        out = proc.communicate(timeout=10)[0]
-        self.assertEqual(proc.returncode, 0, out)
+        if WINDOWS:
+            # Windows has no way to send Ctrl+C to one program alone, without
+            # the tests that run it: the printer checklist covers it there
+            self.stop(proc)
+            out = proc.communicate(timeout=10)[0]
+        else:
+            proc.send_signal(signal.SIGINT)   # Ctrl+C; run.sh has exec'd Python, so it gets it directly
+            out = proc.communicate(timeout=10)[0]
+            self.assertEqual(proc.returncode, 0, out)
         self.assertIn(f"running at http://127.0.0.1:{port}/", out)
         self.assertTrue(os.path.isdir(os.path.join(data, "templates")))

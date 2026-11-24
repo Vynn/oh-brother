@@ -54,12 +54,17 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 - [x] Print progress, label by label as the printer prints, "Printed" in place of "Sent" when the printer shows it, and Cancel until the labels are sent (study: `design/print-bar.html`)
 - [x] Save the label in the preview as a PNG, as printed, at 300 dpi
 
+## 0.7 · Windows
+
+- [x] A Windows runtime and a `run.bat` launcher, added to the folder from Linux or macOS with `sh build.sh windows-x86_64`, so one thumbdrive runs on both
+- [ ] The tests pass on Windows in CI
+- [ ] Tried in real use on a Windows PC, from a thumbdrive and from the hard drive
+
 ## Under consideration
 
 Not scheduled yet.
 
 - Click-to-launch: a Quit button, a single running instance, an Ubuntu app-grid launcher (`run.sh --install`), a macOS `.app` wrapper, and an app icon
-- Windows: a `run.bat` launcher and a Windows runtime
 - ARM Linux and macOS tried in real use (CI has built and tested them since 0.3.5)
 - Two-colour images: the black and red parts of one image printed in their own colours
 - More barcodes: UPC-E for small packages, and GS1-128 for shipping labels

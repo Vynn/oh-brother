@@ -11,11 +11,13 @@ case "$(uname -s)-$(uname -m)" in
     Linux-aarch64|Linux-arm64)  PLAT=linux-aarch64 ;;
     Darwin-arm64)               PLAT=macos-arm64 ;;
     Darwin-x86_64)              PLAT=macos-x86_64 ;;
+    MINGW*-x86_64|MSYS*-x86_64) PLAT=windows-x86_64 ;;   # Git Bash on Windows, as in CI
     *) echo "Unsupported system: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
 esac
 
 # The bundled runtime, or the copy run.sh makes when the drive can't run programs
 PY="$HERE/runtime/$PLAT/python/bin/python3"
+[ "$PLAT" = windows-x86_64 ] && PY="$HERE/runtime/$PLAT/python/python.exe"
 if ! "$PY" -c "" 2>/dev/null; then
     PY="${XDG_CACHE_HOME:-$HOME/.cache}/oh-brother/$PLAT/python/bin/python3"
 fi

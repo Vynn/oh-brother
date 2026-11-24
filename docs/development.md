@@ -29,7 +29,7 @@ sh build.sh
 sh run.sh
 ```
 
-`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app.
+`build.sh` with no arguments builds for the current machine. Name platforms to add more: `linux-x86_64`, `linux-aarch64`, `macos-arm64`, `macos-x86_64`, `windows-x86_64`. The runtime is pinned in `build.sh`. The packages are listed in `requirements.txt` (pure Python) and `requirements-binary.txt` (compiled), at exact versions with their dependencies, so every build of a commit gets the same app.
 
 Everything the build downloads is checked against a SHA-256 kept in the repository, and a download that doesn't match stops the build:
 
@@ -39,14 +39,25 @@ Everything the build downloads is checked against a SHA-256 kept in the reposito
 
 Each folder is built beside the one it replaces (`vendor/common.new`) and swapped in once it's complete. A build that fails, or runs without a network, leaves the last working build in place.
 
+### Windows
+
+`run.bat` is the Windows launcher. It runs `runtime\windows-x86_64\python\python.exe` with the same options as `run.sh`. The Windows runtime keeps `python.exe` at the top of its folder, beside the DLLs it needs, Microsoft's C runtime (`vcruntime140.dll`) among them, so nothing is installed on the PC.
+
+- The Windows folder is built on Linux or macOS: `sh build.sh windows-x86_64` downloads the Windows runtime and Pillow's Windows wheel beside the others. `build.sh` and `test.sh` also run on Windows itself in Git Bash, which is how CI builds and tests it.
+- MarkupSafe's compiled speed-up in `vendor/common` is the one for the machine that built it. Elsewhere MarkupSafe uses its plain Python code, which is slower and gives the same output.
+- `.gitattributes` keeps LF line endings in every text file on Windows, where git is often set to change them and the shell scripts then fail in Git Bash. It gives `run.bat` the CRLF endings the Command Prompt needs.
+- When a drive won't run programs, `run.sh` copies the runtime to `~/.cache/oh-brother/`, since on Linux that comes from how the drive was mounted. `run.bat` doesn't: on Windows it's usually a policy set by whoever looks after the PC, so it says to copy the folder to the PC instead.
+- On Windows, `main.py` doesn't set `SO_REUSEADDR` when looking for a free port, since there it would let the app share a port another program is using.
+- Windows 11 on ARM runs x64 programs through [emulation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation), so it should run the x86_64 folder. That's untested, and there's no ARM runtime.
+
 ### Changing a package
 
 1. Change its version in the requirements file and delete its `--hash` lines.
-2. Run `sh build.sh linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64`. pip stops and prints the line it wants, with the checksum of the file it downloaded. For Pillow it stops once for each platform; for MarkupSafe it prints only this machine's file, and the other three are on its PyPI page.
+2. Run `sh build.sh linux-x86_64 linux-aarch64 macos-arm64 macos-x86_64 windows-x86_64`. pip stops and prints the line it wants, with the checksum of the file it downloaded. For Pillow it stops once for each platform; for MarkupSafe it prints only this machine's file, and the other four are on its PyPI page.
 3. Compare each checksum with the SHA-256 that PyPI lists for that file on the package's *Download files* page, then add it.
 4. Rebuild, run the tests, and update the table under [Third-party code](#third-party-code).
 
-For a new runtime, change `PBS_TAG` and `PY_VER` in `build.sh` and copy the four checksums from the release's `SHA256SUMS` file.
+For a new runtime, change `PBS_TAG` and `PY_VER` in `build.sh` and copy the five checksums from the release's `SHA256SUMS` file.
 
 `sh build.sh --newest` installs the newest version of every package instead, with no checksums, as the monthly check does. It replaces the pinned build in `vendor/`, so run `sh build.sh` again afterwards.
 
@@ -70,7 +81,7 @@ They cover the server side, against a temporary data folder:
 - **Printer status:** decoding the printer's status block in every state seen on a real printer, and every error bit; matching the loaded roll to the tape list; and the question before printing. A fake SNMP agent, a UDP listener on this machine, answers as a QL-820NWB did, and also falls silent, answers another request, or sends damaged replies. The status blocks are built from the layout brother_ql documents.
 - **Printing:** four print jobs are compared byte for byte with reference jobs, stored gzipped. A fake printer, a TCP listener on this machine, receives real jobs from `/api/print` and answers the printer test. Nothing reaches a real printer. Other tests check that a job's labels are drawn one at a time, share one date and time, and that an error names its row.
 - **The API:** requests from other sites, the headers every response carries, errors, templates, the editor's page and files, and the stream that counts open pages. Also settings and templates that can't be used, damaged files, and a save that fails partway.
-- **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C.
+- **The launcher:** its port and browser helpers, and `run.sh` itself, started on a free port, asked for `/api/meta`, and stopped with Ctrl+C. On Windows it's `run.bat`, which is stopped outright, since Windows can't send Ctrl+C to one program without the tests that started it; the printer checklist covers Ctrl+C there.
 
 After an intended change to what's drawn or printed, rewrite the reference files, then look at the new images before committing them:
 
@@ -109,9 +120,9 @@ What only a real printer can show is in the [printer checklist](printer-checklis
 
 ## Continuous integration
 
-GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon and macOS on Intel. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
+GitHub Actions builds the portable folder from scratch and runs the tests on Linux x86_64, Linux ARM, macOS on Apple Silicon, macOS on Intel and Windows x86_64. On Windows the same scripts run in the runner's Git Bash. `tests.yml` runs on every push to `main`, every version tag and every pull request, and can be started by hand from the repository's Actions tab. Each platform runs to the end even when another fails. When output differs from a reference, the differing images or print jobs are attached to the run.
 
-A second job, *Lint and editor tests*, runs the [editor's tests](#the-editors-tests) under Node and looks for mistakes that tests wouldn't run into. `shellcheck` reads the three shell scripts, `node --check` reads each of the editor's files as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
+A second job, *Lint and editor tests*, runs the [editor's tests](#the-editors-tests) under Node and looks for mistakes that tests wouldn't run into. `shellcheck` reads the three shell scripts (`run.bat` has no such checker; the Windows job starts it), `node --check` reads each of the editor's files as a browser would, and `pyflakes` reads the Python for names that are never defined and imports left behind. shellcheck and Node come with GitHub's runner. pyflakes is pinned and checked in `requirements-lint.txt`, and is installed outside the app's folders.
 
 `upstream.yml` runs the same build and tests once a month with the newest version of every package instead of the pinned ones (`sh build.sh --newest`), so a release that would break the app shows up before the pins are raised. GitHub runs schedules only from the default branch, may delay them when busy, and turns them off in a public repository after 60 days without activity.
 
@@ -370,5 +381,7 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 | attrs | 26.1.0 | MIT |
 
 brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.
+
+The Windows runtime includes Microsoft's Visual C++ runtime (`vcruntime140.dll`, `vcruntime140_1.dll`), as python.org's own Windows Python does.
 
 Two more are fetched but never become part of the app: setuptools 84.2.1 (MIT), which pip uses to build packbits, and pyflakes 4.1.0 (MIT), which runs only in CI.

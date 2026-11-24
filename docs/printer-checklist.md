@@ -60,6 +60,18 @@ Note anything that fails, with a photo of the label, before releasing.
 - [ ] Start a long job, 100 copies, and press Cancel while it says "Drawing label …". It says "Cancelled · nothing was sent", and nothing prints.
 - [ ] *Save PNG*, then print the PNG from another program at 100 %: it comes out the size of the label.
 
+## Windows
+
+Before a release that changes `run.bat` or the Windows build, on a Windows PC with the folder built for Windows (`sh build.sh windows-x86_64`). To keep your own templates out of it, start it from a Command Prompt with `run.bat --data %TEMP%\oh-brother-check`.
+
+- [ ] From a thumbdrive: double-click `run.bat`. The editor opens in the default browser, and the printer chip says what the printer has loaded.
+- [ ] Print a black and red label. It matches the same label printed from Linux.
+- [ ] *Save PNG* saves the file through the browser.
+- [ ] Close the browser window. The app stops within about 10 seconds, and the Command Prompt window closes.
+- [ ] Start it again and press Ctrl+C in the Command Prompt window. It stops.
+- [ ] Copy the folder into Documents and start it there. It works the same, with the templates saved on the thumbdrive.
+- [ ] `run.bat --lan` in a Command Prompt. Another device on the network opens the address it prints, once Windows Firewall has allowed it.
+
 ## When the printer can't be reached
 
 - [ ] With the printer switched off, *Print* reports "Send failed" within about ten seconds, and the editor keeps working.

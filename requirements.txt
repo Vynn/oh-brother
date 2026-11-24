@@ -26,13 +26,15 @@ itsdangerous==2.2.0 \
 jinja2==3.1.6 \
     --hash=sha256:85ece4451f492d0c13c5dd7c13a64681a86afae63a5f347908daf103ce6d2f67
 # MarkupSafe comes with a compiled speed-up, so there is a file for each
-# platform the build may run on: Linux x86_64, Linux ARM, macOS Apple Silicon
-# and macOS Intel, in that order. Elsewhere it uses its plain Python code.
+# platform the build may run on: Linux x86_64, Linux ARM, macOS Apple Silicon,
+# macOS Intel and Windows x86_64, in that order. vendor/common holds the one
+# for the machine that built it; elsewhere it uses its plain Python code.
 markupsafe==3.0.4 \
     --hash=sha256:434139499bb20b502ed3baa1f169e618f924a97e7a777fea1a49446d80106cf6 \
     --hash=sha256:7018d4af1cd272e847aa5917983ab5e83e4f6579f9dbfecd4a79c0ca80b144c2 \
     --hash=sha256:73e77980c7207854f00fc4e71fb1626868d5740ab4012623d55c7a99ad122a72 \
-    --hash=sha256:2d1b7d9308288661f56672b1b157d75fc536714d3638487bbea17b6318a78248
+    --hash=sha256:2d1b7d9308288661f56672b1b157d75fc536714d3638487bbea17b6318a78248 \
+    --hash=sha256:1f1f9477e174582b0a1b583d60b66e1f2cf5d3fe12cee985e4aedf44766600e5
 # Source only: pip builds it, with the setuptools in requirements-build.txt
 packbits==0.6 \
     --hash=sha256:bc6b370bb34e04ac8cfa835e06c0484380affc6d593adb8009dd6c0f7bfff034

@@ -10,13 +10,14 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# The same platform names as run.sh
+# The same platform names as run.sh and run.bat
 PLATFORMS = {
     ("Linux", "x86_64"): "linux-x86_64",
     ("Linux", "aarch64"): "linux-aarch64",
     ("Linux", "arm64"): "linux-aarch64",
     ("Darwin", "arm64"): "macos-arm64",
     ("Darwin", "x86_64"): "macos-x86_64",
+    ("Windows", "AMD64"): "windows-x86_64",
 }
 PLATFORM = PLATFORMS.get((platform.system(), platform.machine()))
 if not PLATFORM:

@@ -2,6 +2,19 @@
 
 All notable changes, by version. Versions follow the [roadmap](ROADMAP.md): a minor version per milestone, and until 1.0 patch versions for the builds between them.
 
+## 0.7.0 · unreleased
+
+Oh-Brother runs on Windows.
+
+### Added
+
+- Windows 10 and 11 on x86_64, from a thumbdrive or the hard drive. On Linux or macOS, `sh build.sh windows-x86_64` adds Windows' own Python and packages to the folder, so one thumbdrive can carry both; on the PC, double-click `run.bat`. The tests run on Windows on every change, but it hasn't been tried with a printer yet.
+- If Windows won't run programs from the thumbdrive, `run.bat` says to copy the folder to the PC. On Linux the app copies its Python elsewhere to get round that; on Windows it's usually a rule set by whoever looks after the PC, so it doesn't.
+
+### Changed
+
+- The lines the app prints when it starts, such as "running at …", now appear at once when its output goes to a file or another program. They used to wait until there was more to print.
+
 ## 0.6.0 · 2026-11-12
 
 The printer says what it has loaded, whether it's ready, and how far a print has got.

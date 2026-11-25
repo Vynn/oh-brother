@@ -57,7 +57,7 @@ Oh-Brother grows one milestone at a time. Each milestone is a minor version (0.2
 ## 0.7 · Windows
 
 - [x] A Windows runtime and a `run.bat` launcher, added to the folder from Linux or macOS with `sh build.sh windows-x86_64`, so one thumbdrive runs on both
-- [ ] The tests pass on Windows in CI
+- [x] The tests pass on Windows in CI
 - [ ] Tried in real use on a Windows PC, from a thumbdrive and from the hard drive
 
 ## Under consideration

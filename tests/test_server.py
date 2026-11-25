@@ -530,6 +530,12 @@ class PagePolicy(ApiTest):
             with self.subTest(path), self.client.get(path) as resp:
                 self.assertIn(kind, resp.content_type)
 
+    def test_static_types_dont_depend_on_this_machine(self):
+        # Python takes file types from the system, and Windows' registry can
+        # say .mjs is plain text, which a browser won't run as a module
+        with mock.patch("mimetypes.guess_type", return_value=("text/plain", None)):
+            self.test_static_files_say_what_they_are()
+
     def test_the_page_keeps_to_its_policy(self):
         # The policy allows scripts and styles from the app's own files only,
         # so the page has none written into it, and the editor adds none

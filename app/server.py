@@ -30,6 +30,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SAMPLES = os.path.join(ROOT, "samples")
 # The editor's own tests, served only when asked for (--tests); see create_app()
 EDITOR_TESTS = os.path.join(ROOT, "tests", "editor")
+# The types the editor's files are sent with, fixed here rather than taken from
+# this machine's settings. Python reads those from the system, and on Windows
+# that's the registry, where .mjs can be plain text: a browser then won't run
+# the editor's code at all. Other files go by Python's guess.
+FILE_TYPES = {".html": "text/html", ".css": "text/css", ".mjs": "text/javascript"}
 MODELS = ["QL-800", "QL-810W", "QL-820NWB"]  # two-colour capable QL models
 DEFAULT_CONFIG = {"printer_host": "", "printer_port": 9100, "model": "QL-820NWB"}
 KEEPALIVE_S = 3   # how often the presence stream writes; a closed page is noticed on the next write
@@ -249,6 +254,12 @@ def is_local_host(host):
         return False
 
 
+def page_file(folder, name):
+    """A file from `folder`, sent with its type from FILE_TYPES."""
+    kind = FILE_TYPES.get(os.path.splitext(name)[1].lower())   # None: Python's guess
+    return send_from_directory(folder, name, mimetype=kind)
+
+
 def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
     """The app. `lan`: other machines may connect, by any name for this one.
     `editor_tests`: also serve the editor's tests, as a page to open."""
@@ -386,11 +397,11 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
 
     @app.get("/")
     def index():
-        return send_from_directory(STATIC, "index.html")
+        return page_file(STATIC, "index.html")
 
     @app.get("/static/<path:p>")
     def static_files(p):
-        return send_from_directory(STATIC, p)
+        return page_file(STATIC, p)
 
     # ---- the editor's tests, with --tests -----------------------------------
     # The test files import the editor's modules by the path between the two
@@ -400,15 +411,15 @@ def create_app(data_dir, lan=False, samples_dir=SAMPLES, editor_tests=False):
     if editor_tests:
         @app.get("/tests/editor/")
         def editor_tests_page():
-            return send_from_directory(EDITOR_TESTS, "index.html")
+            return page_file(EDITOR_TESTS, "index.html")
 
         @app.get("/tests/editor/<path:p>")
         def editor_tests_files(p):
-            return send_from_directory(EDITOR_TESTS, p)
+            return page_file(EDITOR_TESTS, p)
 
         @app.get("/app/static/<path:p>")
         def editor_modules(p):
-            return send_from_directory(STATIC, p)
+            return page_file(STATIC, p)
 
     # ---- presence: lets the launcher stop once the last page closes --------
 

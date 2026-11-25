@@ -48,6 +48,7 @@ Each folder is built beside the one it replaces (`vendor/common.new`) and swappe
 - A build on Windows also installs colorama, which qrcode asks for there, for its command-line tool. The app doesn't need it: qrcode's library doesn't import it, and Werkzeug uses it only if it's there. So a Windows folder built on Linux or macOS goes without it.
 - `.gitattributes` keeps LF line endings in every text file on Windows, where git is often set to change them and the shell scripts then fail in Git Bash. It gives `run.bat` the CRLF endings the Command Prompt needs.
 - When a drive won't run programs, `run.sh` copies the runtime to `~/.cache/oh-brother/`, since on Linux that comes from how the drive was mounted. `run.bat` doesn't: on Windows it's usually a policy set by whoever looks after the PC, so it says to copy the folder to the PC instead.
+- The editor's files are sent with types fixed in `server.FILE_TYPES`, not ones taken from the machine. Python reads file types from the system, and on Windows that's the registry, which on GitHub's Windows runner says `.mjs` is plain text. A browser won't run a module sent that way, so the editor wouldn't start.
 - On Windows, `main.py` doesn't set `SO_REUSEADDR` when looking for a free port, since there it would let the app share a port another program is using.
 - Windows 11 on ARM runs x64 programs through [emulation](https://learn.microsoft.com/en-us/windows/arm/apps-on-arm-x86-emulation), so it should run the x86_64 folder. That's untested, and there's no ARM runtime.
 

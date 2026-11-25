@@ -45,6 +45,7 @@ Each folder is built beside the one it replaces (`vendor/common.new`) and swappe
 
 - The Windows folder is built on Linux or macOS: `sh build.sh windows-x86_64` downloads the Windows runtime and Pillow's Windows wheel beside the others. `build.sh` and `test.sh` also run on Windows itself in Git Bash, which is how CI builds and tests it.
 - MarkupSafe's compiled speed-up in `vendor/common` is the one for the machine that built it. Elsewhere MarkupSafe uses its plain Python code, which is slower and gives the same output.
+- A build on Windows also installs colorama, which qrcode asks for there, for its command-line tool. The app doesn't need it: qrcode's library doesn't import it, and Werkzeug uses it only if it's there. So a Windows folder built on Linux or macOS goes without it.
 - `.gitattributes` keeps LF line endings in every text file on Windows, where git is often set to change them and the shell scripts then fail in Git Bash. It gives `run.bat` the CRLF endings the Command Prompt needs.
 - When a drive won't run programs, `run.sh` copies the runtime to `~/.cache/oh-brother/`, since on Linux that comes from how the drive was mounted. `run.bat` doesn't: on Windows it's usually a policy set by whoever looks after the PC, so it says to copy the folder to the PC instead.
 - On Windows, `main.py` doesn't set `SO_REUSEADDR` when looking for a free port, since there it would let the app share a port another program is using.
@@ -379,6 +380,7 @@ All from Ubuntu's packages, unmodified, in `app/fonts/`.
 | packbits | 0.6 | MIT |
 | pyusb | 1.3.1 | BSD-3-Clause |
 | attrs | 26.1.0 | MIT |
+| colorama, only when built on Windows | 0.4.6 | BSD-3-Clause |
 
 brother_ql is GPL-3.0-or-later, which is one reason Oh-Brother is GPL-3.0.
 
